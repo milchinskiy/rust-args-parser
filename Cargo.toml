@@ -1,0 +1,40 @@
+[package]
+rust-version = "1.60"
+edition = "2021"
+name = "rust-args-parser"
+description = "Tiny, fast, callback-based CLI argument parser for Rust"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/milchinskiy/rust-args-parser"
+repository = "https://github.com/milchinskiy/rust-args-parser"
+documentation = "https://docs.rs/rust-args-parser"
+readme = "README.md"
+keywords = ["cli", "command-line", "args", "parser"]
+categories = ["command-line-interface"]
+
+[lints.clippy]
+pedantic = "warn"
+correctness = "warn"
+complexity = "warn"
+performance = "warn"
+nursery = "warn"
+style = "warn"
+cargo = "warn"
+redundant_pub_crate = "warn"
+
+[dependencies]
+
+[dev-dependencies]
+criterion = "0.5"
+clap = { version = "4", features = ["std", "help"] }
+lexopt = "0.3"
+pico-args = "0.5"
+
+[[bench]]
+name = "parse_scenarios"
+harness = false
+
+[[bench]]
+name = "parse_addons"
+harness = false
+
