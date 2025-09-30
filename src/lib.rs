@@ -14,10 +14,10 @@ use std::io::{self, Write};
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Each option/flag invokes a callback.
-pub type OptCallback<U> = for<'a> fn(Option<&'a str>, &mut U) -> Result<()>;
+pub type OptCallback<Ctx> = for<'a> fn(Option<&'a str>, &mut Ctx) -> Result<()>;
 
 /// Command runner for the resolved command (receives final positionals).
-pub type RunCallback<U> = fn(&[&str], &mut U) -> Result<()>;
+pub type RunCallback<Ctx> = fn(&[&str], &mut Ctx) -> Result<()>;
 
 /// Whether the option takes a value or not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +50,7 @@ pub enum ValueHint {
 }
 /// An option/flag specification.
 #[derive(Clone, Copy)]
-pub struct OptSpec<'a, U> {
+pub struct OptSpec<'a, Ctx> {
     name: &'a str,            // long name without "--"
     short: Option<char>,      // short form without '-'
     arg: ArgKind,             // whether it takes a value
@@ -61,12 +61,12 @@ pub struct OptSpec<'a, U> {
     group_id: u16,            // 0 = none, >0 = group identifier
     group_mode: GroupMode,    // XOR / REQ_ONE semantics
     value_hint: ValueHint,    // value hint
-    cb: OptCallback<U>,       // callback on set/apply
+    cb: OptCallback<Ctx>,       // callback on set/apply
 }
 
-impl<'a, U> OptSpec<'a, U> {
+impl<'a, Ctx> OptSpec<'a, Ctx> {
     /// Create a new option.
-    pub const fn new(name: &'a str, cb: OptCallback<U>) -> Self {
+    pub const fn new(name: &'a str, cb: OptCallback<Ctx>) -> Self {
         Self {
             name,
             short: None,
@@ -195,21 +195,21 @@ impl<'a> PosSpec<'a> {
 }
 
 /// Command specification.
-pub struct CmdSpec<'a, U> {
+pub struct CmdSpec<'a, Ctx> {
     name: Option<&'a str>, // None for root
     desc: Option<&'a str>,
-    opts: Box<[OptSpec<'a, U>]>,
-    subs: Box<[CmdSpec<'a, U>]>,
+    opts: Box<[OptSpec<'a, Ctx>]>,
+    subs: Box<[CmdSpec<'a, Ctx>]>,
     pos: Box<[PosSpec<'a>]>,
     aliases: Box<[&'a str]>,
-    run: Option<RunCallback<U>>, // called with positionals
+    run: Option<RunCallback<Ctx>>, // called with positionals
 }
 
-impl<'a, U> CmdSpec<'a, U> {
+impl<'a, Ctx> CmdSpec<'a, Ctx> {
     /// Create a new command.
     /// `name` is `None` for root command.
     #[must_use]
-    pub fn new(name: Option<&'a str>, run: Option<RunCallback<U>>) -> Self {
+    pub fn new(name: Option<&'a str>, run: Option<RunCallback<Ctx>>) -> Self {
         Self {
             name,
             desc: None,
@@ -230,7 +230,7 @@ impl<'a, U> CmdSpec<'a, U> {
     #[must_use]
     pub fn opts<S>(mut self, s: S) -> Self
     where
-        S: Into<Vec<OptSpec<'a, U>>>,
+        S: Into<Vec<OptSpec<'a, Ctx>>>,
     {
         self.opts = s.into().into_boxed_slice();
         self
@@ -323,11 +323,11 @@ impl<'a> Env<'a> {
 /// auto help/version/author output to `out` when triggered.
 /// # Errors
 /// See [`Error`]
-pub fn dispatch_to<U, W: Write>(
+pub fn dispatch_to<Ctx, W: Write>(
     env: &Env<'_>,
-    root: &CmdSpec<'_, U>,
+    root: &CmdSpec<'_, Ctx>,
     argv: &[&str],
-    user: &mut U,
+    context: &mut Ctx,
     out: &mut W,
 ) -> Result<()> {
     let mut idx = 0usize;
@@ -364,12 +364,12 @@ pub fn dispatch_to<U, W: Write>(
             }
             if tok.starts_with("--") {
                 idx += 1;
-                parse_long(env, cmd, tok, &mut idx, argv, user, &mut gcounts, out)?;
+                parse_long(env, cmd, tok, &mut idx, argv, context, &mut gcounts, out)?;
                 continue;
             }
             if is_short_like(tok) {
                 idx += 1;
-                parse_short_cluster(env, cmd, tok, &mut idx, argv, user, &mut gcounts, out)?;
+                parse_short_cluster(env, cmd, tok, &mut idx, argv, context, &mut gcounts, out)?;
                 continue;
             }
         }
@@ -380,14 +380,14 @@ pub fn dispatch_to<U, W: Write>(
     if cmd.pos.is_empty() && !pos.is_empty() {
         return Err(Error::UnexpectedArgument(pos[0].to_string()));
     }
-    apply_env_and_defaults(cmd, user, &mut gcounts)?;
+    apply_env_and_defaults(cmd, context, &mut gcounts)?;
     // strict groups: XOR → ≤1, REQ_ONE → ≥1 (env/defaults count)
     check_groups(cmd, &gcounts)?;
     // validate positionals against schema
     validate_positionals(cmd, &pos)?;
     // run command
     if let Some(run) = cmd.run {
-        return run(&pos, user);
+        return run(&pos, context);
     }
     Ok(())
 }
@@ -395,14 +395,14 @@ pub fn dispatch_to<U, W: Write>(
 /// Default dispatch that prints auto help/version/author to **stdout**.
 /// # Errors
 /// See [`Error`]
-pub fn dispatch<U>(
+pub fn dispatch<Ctx>(
     env: &Env<'_>,
-    root: &CmdSpec<'_, U>,
+    root: &CmdSpec<'_, Ctx>,
     argv: &[&str],
-    user: &mut U,
+    context: &mut Ctx,
 ) -> Result<()> {
     let mut out = io::stdout();
-    dispatch_to(env, root, argv, user, &mut out)
+    dispatch_to(env, root, argv, context, &mut out)
 }
 
 /* ================================ Errors ===================================== */
@@ -447,7 +447,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /* ================================ Parsing ==================================== */
-fn find_sub<'a, U>(cmd: &'a CmdSpec<'a, U>, name: &str) -> Option<&'a CmdSpec<'a, U>> {
+fn find_sub<'a, Ctx>(cmd: &'a CmdSpec<'a, Ctx>, name: &str) -> Option<&'a CmdSpec<'a, Ctx>> {
     for c in &cmd.subs {
         if let Some(n) = c.name {
             if n == name {
@@ -460,7 +460,7 @@ fn find_sub<'a, U>(cmd: &'a CmdSpec<'a, U>, name: &str) -> Option<&'a CmdSpec<'a
     }
     None
 }
-fn apply_env_and_defaults<U>(cmd: &CmdSpec<'_, U>, user: &mut U, counts: &mut [u8]) -> Result<()> {
+fn apply_env_and_defaults<Ctx>(cmd: &CmdSpec<'_, Ctx>, context: &mut Ctx, counts: &mut [u8]) -> Result<()> {
     if cmd.opts.is_empty() {
         return Ok(());
     }
@@ -473,7 +473,7 @@ fn apply_env_and_defaults<U>(cmd: &CmdSpec<'_, U>, user: &mut U, counts: &mut [u
         if let Some(key) = o.env {
             if let Ok(val) = std::env::var(key) {
                 counts[i] = counts[i].saturating_add(1);
-                (o.cb)(Some(val.as_str()), user)?;
+                (o.cb)(Some(val.as_str()), context)?;
             }
         }
     }
@@ -497,19 +497,19 @@ fn apply_env_and_defaults<U>(cmd: &CmdSpec<'_, U>, user: &mut U, counts: &mut [u
             }
         }
         counts[i] = counts[i].saturating_add(1);
-        (o.cb)(Some(def), user)?;
+        (o.cb)(Some(def), context)?;
     }
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-fn parse_long<U, W: std::io::Write>(
+fn parse_long<Ctx, W: std::io::Write>(
     env: &Env<'_>,
-    cmd: &CmdSpec<'_, U>,
+    cmd: &CmdSpec<'_, Ctx>,
     tok: &str,
     idx: &mut usize,
     argv: &[&str],
-    user: &mut U,
+    context: &mut Ctx,
     counts: &mut [u8],
     out: &mut W,
 ) -> Result<()> {
@@ -540,7 +540,7 @@ fn parse_long<U, W: std::io::Write>(
     counts[i] = counts[i].saturating_add(1);
     match spec.arg {
         ArgKind::None => {
-            (spec.cb)(None, user)?;
+            (spec.cb)(None, context)?;
         }
         ArgKind::Required => {
             let v = if let Some(a) = attached {
@@ -551,7 +551,7 @@ fn parse_long<U, W: std::io::Write>(
             } else {
                 take_next(idx, argv).ok_or_else(|| Error::MissingValue(spec.name.to_string()))?
             };
-            (spec.cb)(Some(v), user)?;
+            (spec.cb)(Some(v), context)?;
         }
         ArgKind::Optional => {
             let v = match (attached, argv.get(*idx).copied()) {
@@ -572,20 +572,20 @@ fn parse_long<U, W: std::io::Write>(
                 }
                 _ => None,
             };
-            (spec.cb)(v, user)?;
+            (spec.cb)(v, context)?;
         }
     }
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-fn parse_short_cluster<U, W: std::io::Write>(
+fn parse_short_cluster<Ctx, W: std::io::Write>(
     env: &Env<'_>,
-    cmd: &CmdSpec<'_, U>,
+    cmd: &CmdSpec<'_, Ctx>,
     tok: &str,
     idx: &mut usize,
     argv: &[&str],
-    user: &mut U,
+    context: &mut Ctx,
     counts: &mut [u8],
     out: &mut W,
 ) -> Result<()> {
@@ -624,23 +624,23 @@ fn parse_short_cluster<U, W: std::io::Write>(
         counts[oi] = counts[oi].saturating_add(1);
         match spec.arg {
             ArgKind::None => {
-                (spec.cb)(None, user)?;
+                (spec.cb)(None, context)?;
             }
             ArgKind::Required => {
                 if i < s.len() {
                     let rem = &s[i..];
-                    (spec.cb)(Some(rem), user)?;
+                    (spec.cb)(Some(rem), context)?;
                     return Ok(());
                 }
                 let v = take_next(idx, argv)
                     .ok_or_else(|| Error::MissingValue(spec.name.to_string()))?;
-                (spec.cb)(Some(v), user)?;
+                (spec.cb)(Some(v), context)?;
                 return Ok(());
             }
             ArgKind::Optional => {
                 if i < s.len() {
                     let rem = &s[i..];
-                    (spec.cb)(Some(rem), user)?;
+                    (spec.cb)(Some(rem), context)?;
                     return Ok(());
                 }
                 // SPECIAL: if next token is exactly "-", CONSUME it but treat as "no value".
@@ -663,7 +663,7 @@ fn parse_short_cluster<U, W: std::io::Write>(
                     }
                     _ => None,
                 };
-                (spec.cb)(v.map(|v| &**v), user)?;
+                (spec.cb)(v.map(|v| &**v), context)?;
                 return Ok(());
             }
         }
@@ -672,7 +672,7 @@ fn parse_short_cluster<U, W: std::io::Write>(
 }
 
 #[inline]
-fn any_env_or_default<U>(cmd: &CmdSpec<'_, U>) -> bool {
+fn any_env_or_default<Ctx>(cmd: &CmdSpec<'_, Ctx>) -> bool {
     cmd.opts.iter().any(|o| o.env.is_some() || o.default.is_some())
 }
 #[inline]
@@ -755,7 +755,7 @@ fn is_numeric_like(b: &[u8]) -> bool {
     i == n
 }
 
-fn check_groups<U>(cmd: &CmdSpec<'_, U>, counts: &[u8]) -> Result<()> {
+fn check_groups<Ctx>(cmd: &CmdSpec<'_, Ctx>, counts: &[u8]) -> Result<()> {
     let opts = &cmd.opts;
     let opts_len = opts.len();
     let mut index = 0usize;
@@ -804,7 +804,7 @@ fn check_groups<U>(cmd: &CmdSpec<'_, U>, counts: &[u8]) -> Result<()> {
 
 #[cold]
 #[inline(never)]
-fn group_msg<U>(opts: &[OptSpec<'_, U>], id: u16, xor: bool) -> String {
+fn group_msg<Ctx>(opts: &[OptSpec<'_, Ctx>], id: u16, xor: bool) -> String {
     let mut names = String::new();
     for o in opts.iter().filter(|o| o.group_id == id) {
         if !names.is_empty() {
@@ -819,7 +819,7 @@ fn group_msg<U>(opts: &[OptSpec<'_, U>], id: u16, xor: bool) -> String {
     }
 }
 
-fn validate_positionals<U>(cmd: &CmdSpec<'_, U>, pos: &[&str]) -> Result<()> {
+fn validate_positionals<Ctx>(cmd: &CmdSpec<'_, Ctx>, pos: &[&str]) -> Result<()> {
     if cmd.pos.is_empty() {
         return Ok(());
     }
@@ -860,7 +860,7 @@ fn validate_positionals<U>(cmd: &CmdSpec<'_, U>, pos: &[&str]) -> Result<()> {
     Ok(())
 }
 #[inline]
-const fn plain_opt_label_len<U>(o: &OptSpec<'_, U>) -> usize {
+const fn plain_opt_label_len<Ctx>(o: &OptSpec<'_, Ctx>) -> usize {
     let mut len = if o.short.is_some() { 4 } else { 0 }; // "-x, "
     len += 2 + o.name.len(); // "--" + name
     if let Some(m) = o.metavar {
@@ -869,7 +869,7 @@ const fn plain_opt_label_len<U>(o: &OptSpec<'_, U>) -> usize {
     len
 }
 #[inline]
-fn make_opt_label<U>(o: &OptSpec<'_, U>) -> String {
+fn make_opt_label<Ctx>(o: &OptSpec<'_, Ctx>) -> String {
     let mut s = String::new();
     if let Some(ch) = o.short {
         s.push('-');
@@ -903,7 +903,7 @@ fn colorize(s: &str, color: &str, env: &Env) -> String {
     }
 }
 #[inline]
-fn help_text_for_opt<U>(o: &OptSpec<'_, U>) -> String {
+fn help_text_for_opt<Ctx>(o: &OptSpec<'_, Ctx>) -> String {
     match (o.env, o.default) {
         (Some(k), Some(d)) => format!("{} (env {k}, default={d})", o.help),
         (Some(k), None) => format!("{} (env {k})", o.help),
@@ -916,11 +916,11 @@ fn print_header(buf: &mut String, text: &str, env: &Env) {
     let _ = writeln!(buf, "\n{}:", colorize(text, &[C_BOLD, C_UNDERLINE].concat(), env).as_str());
 }
 #[inline]
-fn lookup_short<'a, U>(
-    cmd: &'a CmdSpec<'a, U>,
+fn lookup_short<'a, Ctx>(
+    cmd: &'a CmdSpec<'a, Ctx>,
     table: &[u16; 128],
     ch: char,
-) -> Option<(usize, &'a OptSpec<'a, U>)> {
+) -> Option<(usize, &'a OptSpec<'a, Ctx>)> {
     let c = ch as u32;
     if c < 128 {
         let i = table[c as usize];
@@ -932,7 +932,7 @@ fn lookup_short<'a, U>(
     }
     cmd.opts.iter().enumerate().find(|(_, o)| o.short == Some(ch))
 }
-fn build_short_idx<U>(cmd: &CmdSpec<'_, U>) -> [u16; 128] {
+fn build_short_idx<Ctx>(cmd: &CmdSpec<'_, Ctx>) -> [u16; 128] {
     let mut map = [u16::MAX; 128];
     let mut i = 0usize;
     let len = cmd.opts.len();
@@ -1006,7 +1006,7 @@ fn write_row(
 /// Print help to the provided writer.
 #[cold]
 #[inline(never)]
-pub fn print_help_to<U, W: Write>(env: &Env<'_>, cmd: &CmdSpec<'_, U>, mut out: W) {
+pub fn print_help_to<Ctx, W: Write>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, mut out: W) {
     let mut buf = String::new();
     let _ = write!(
         buf,
