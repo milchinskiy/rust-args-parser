@@ -50,7 +50,7 @@ pub enum ValueHint {
 }
 /// An option/flag specification.
 #[derive(Clone, Copy)]
-pub struct OptSpec<'a, Ctx> {
+pub struct OptSpec<'a, Ctx: ?Sized> {
     name: &'a str,            // long name without "--"
     short: Option<char>,      // short form without '-'
     arg: ArgKind,             // whether it takes a value
@@ -64,7 +64,7 @@ pub struct OptSpec<'a, Ctx> {
     cb: OptCallback<Ctx>,       // callback on set/apply
 }
 
-impl<'a, Ctx> OptSpec<'a, Ctx> {
+impl<'a, Ctx: ?Sized> OptSpec<'a, Ctx> {
     /// Create a new option.
     pub const fn new(name: &'a str, cb: OptCallback<Ctx>) -> Self {
         Self {
@@ -195,7 +195,7 @@ impl<'a> PosSpec<'a> {
 }
 
 /// Command specification.
-pub struct CmdSpec<'a, Ctx> {
+pub struct CmdSpec<'a, Ctx: ?Sized> {
     name: Option<&'a str>, // None for root
     desc: Option<&'a str>,
     opts: Box<[OptSpec<'a, Ctx>]>,
@@ -205,7 +205,7 @@ pub struct CmdSpec<'a, Ctx> {
     run: Option<RunCallback<Ctx>>, // called with positionals
 }
 
-impl<'a, Ctx> CmdSpec<'a, Ctx> {
+impl<'a, Ctx: ?Sized> CmdSpec<'a, Ctx> {
     /// Create a new command.
     /// `name` is `None` for root command.
     #[must_use]
@@ -323,7 +323,7 @@ impl<'a> Env<'a> {
 /// auto help/version/author output to `out` when triggered.
 /// # Errors
 /// See [`Error`]
-pub fn dispatch_to<Ctx, W: Write>(
+pub fn dispatch_to<Ctx: ?Sized, W: Write>(
     env: &Env<'_>,
     root: &CmdSpec<'_, Ctx>,
     argv: &[&str],
@@ -447,7 +447,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /* ================================ Parsing ==================================== */
-fn find_sub<'a, Ctx>(cmd: &'a CmdSpec<'a, Ctx>, name: &str) -> Option<&'a CmdSpec<'a, Ctx>> {
+fn find_sub<'a, Ctx: ?Sized>(cmd: &'a CmdSpec<'a, Ctx>, name: &str) -> Option<&'a CmdSpec<'a, Ctx>> {
     for c in &cmd.subs {
         if let Some(n) = c.name {
             if n == name {
@@ -460,7 +460,7 @@ fn find_sub<'a, Ctx>(cmd: &'a CmdSpec<'a, Ctx>, name: &str) -> Option<&'a CmdSpe
     }
     None
 }
-fn apply_env_and_defaults<Ctx>(cmd: &CmdSpec<'_, Ctx>, context: &mut Ctx, counts: &mut [u8]) -> Result<()> {
+fn apply_env_and_defaults<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, context: &mut Ctx, counts: &mut [u8]) -> Result<()> {
     if cmd.opts.is_empty() {
         return Ok(());
     }
@@ -503,7 +503,7 @@ fn apply_env_and_defaults<Ctx>(cmd: &CmdSpec<'_, Ctx>, context: &mut Ctx, counts
 }
 
 #[allow(clippy::too_many_arguments)]
-fn parse_long<Ctx, W: std::io::Write>(
+fn parse_long<Ctx: ?Sized, W: std::io::Write>(
     env: &Env<'_>,
     cmd: &CmdSpec<'_, Ctx>,
     tok: &str,
@@ -579,7 +579,7 @@ fn parse_long<Ctx, W: std::io::Write>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn parse_short_cluster<Ctx, W: std::io::Write>(
+fn parse_short_cluster<Ctx: ?Sized, W: std::io::Write>(
     env: &Env<'_>,
     cmd: &CmdSpec<'_, Ctx>,
     tok: &str,
@@ -672,7 +672,7 @@ fn parse_short_cluster<Ctx, W: std::io::Write>(
 }
 
 #[inline]
-fn any_env_or_default<Ctx>(cmd: &CmdSpec<'_, Ctx>) -> bool {
+fn any_env_or_default<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>) -> bool {
     cmd.opts.iter().any(|o| o.env.is_some() || o.default.is_some())
 }
 #[inline]
@@ -755,7 +755,7 @@ fn is_numeric_like(b: &[u8]) -> bool {
     i == n
 }
 
-fn check_groups<Ctx>(cmd: &CmdSpec<'_, Ctx>, counts: &[u8]) -> Result<()> {
+fn check_groups<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, counts: &[u8]) -> Result<()> {
     let opts = &cmd.opts;
     let opts_len = opts.len();
     let mut index = 0usize;
@@ -804,7 +804,7 @@ fn check_groups<Ctx>(cmd: &CmdSpec<'_, Ctx>, counts: &[u8]) -> Result<()> {
 
 #[cold]
 #[inline(never)]
-fn group_msg<Ctx>(opts: &[OptSpec<'_, Ctx>], id: u16, xor: bool) -> String {
+fn group_msg<Ctx: ?Sized>(opts: &[OptSpec<'_, Ctx>], id: u16, xor: bool) -> String {
     let mut names = String::new();
     for o in opts.iter().filter(|o| o.group_id == id) {
         if !names.is_empty() {
@@ -819,7 +819,7 @@ fn group_msg<Ctx>(opts: &[OptSpec<'_, Ctx>], id: u16, xor: bool) -> String {
     }
 }
 
-fn validate_positionals<Ctx>(cmd: &CmdSpec<'_, Ctx>, pos: &[&str]) -> Result<()> {
+fn validate_positionals<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, pos: &[&str]) -> Result<()> {
     if cmd.pos.is_empty() {
         return Ok(());
     }
@@ -860,7 +860,7 @@ fn validate_positionals<Ctx>(cmd: &CmdSpec<'_, Ctx>, pos: &[&str]) -> Result<()>
     Ok(())
 }
 #[inline]
-const fn plain_opt_label_len<Ctx>(o: &OptSpec<'_, Ctx>) -> usize {
+const fn plain_opt_label_len<Ctx: ?Sized>(o: &OptSpec<'_, Ctx>) -> usize {
     let mut len = if o.short.is_some() { 4 } else { 0 }; // "-x, "
     len += 2 + o.name.len(); // "--" + name
     if let Some(m) = o.metavar {
@@ -869,7 +869,7 @@ const fn plain_opt_label_len<Ctx>(o: &OptSpec<'_, Ctx>) -> usize {
     len
 }
 #[inline]
-fn make_opt_label<Ctx>(o: &OptSpec<'_, Ctx>) -> String {
+fn make_opt_label<Ctx: ?Sized>(o: &OptSpec<'_, Ctx>) -> String {
     let mut s = String::new();
     if let Some(ch) = o.short {
         s.push('-');
@@ -903,7 +903,7 @@ fn colorize(s: &str, color: &str, env: &Env) -> String {
     }
 }
 #[inline]
-fn help_text_for_opt<Ctx>(o: &OptSpec<'_, Ctx>) -> String {
+fn help_text_for_opt<Ctx: ?Sized>(o: &OptSpec<'_, Ctx>) -> String {
     match (o.env, o.default) {
         (Some(k), Some(d)) => format!("{} (env {k}, default={d})", o.help),
         (Some(k), None) => format!("{} (env {k})", o.help),
@@ -916,7 +916,7 @@ fn print_header(buf: &mut String, text: &str, env: &Env) {
     let _ = writeln!(buf, "\n{}:", colorize(text, &[C_BOLD, C_UNDERLINE].concat(), env).as_str());
 }
 #[inline]
-fn lookup_short<'a, Ctx>(
+fn lookup_short<'a, Ctx: ?Sized>(
     cmd: &'a CmdSpec<'a, Ctx>,
     table: &[u16; 128],
     ch: char,
@@ -932,7 +932,7 @@ fn lookup_short<'a, Ctx>(
     }
     cmd.opts.iter().enumerate().find(|(_, o)| o.short == Some(ch))
 }
-fn build_short_idx<Ctx>(cmd: &CmdSpec<'_, Ctx>) -> [u16; 128] {
+fn build_short_idx<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>) -> [u16; 128] {
     let mut map = [u16::MAX; 128];
     let mut i = 0usize;
     let len = cmd.opts.len();
@@ -1006,7 +1006,7 @@ fn write_row(
 /// Print help to the provided writer.
 #[cold]
 #[inline(never)]
-pub fn print_help_to<Ctx, W: Write>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, mut out: W) {
+pub fn print_help_to<Ctx: ?Sized, W: Write>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, mut out: W) {
     let mut buf = String::new();
     let _ = write!(
         buf,
