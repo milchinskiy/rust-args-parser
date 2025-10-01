@@ -244,7 +244,9 @@ fn user_error_bubbles_up() {
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
     match dispatch_to(&env, &cmd, &["--boom"], &mut u, &mut out) {
-        Err(Error::User("bad")) => {}
+        Err(Error::Callback(e)) => {
+            assert!(e.to_string().contains("bad"));
+        }
         other => panic!("unexpected: {other:?}"),
     }
 }

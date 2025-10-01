@@ -10,14 +10,15 @@ use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
 /* ================================ Public API ================================= */
+type BoxError = Box<dyn std::error::Error>;
 /// Library level error type.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Each option/flag invokes a callback.
-pub type OptCallback<Ctx> = for<'a> fn(Option<&'a str>, &mut Ctx) -> Result<()>;
+pub type OptCallback<Ctx> = for<'a> fn(Option<&'a str>, &mut Ctx) -> std::result::Result<(), BoxError>;
 
 /// Command runner for the resolved command (receives final positionals).
-pub type RunCallback<Ctx> = fn(&[&str], &mut Ctx) -> Result<()>;
+pub type RunCallback<Ctx> = fn(&[&str], &mut Ctx) -> std::result::Result<(), BoxError>;
 
 /// Whether the option takes a value or not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -387,7 +388,7 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
     validate_positionals(cmd, &pos)?;
     // run command
     if let Some(run) = cmd.run {
-        return run(&pos, context);
+        return run(&pos, context).map_err(Error::Callback);
     }
     Ok(())
 }
@@ -407,7 +408,7 @@ pub fn dispatch<Ctx>(
 
 /* ================================ Errors ===================================== */
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 /// Error type
 pub enum Error {
     /// Unknown option
@@ -424,6 +425,8 @@ pub enum Error {
     MissingPositional(String),
     /// Too many positionals
     TooManyPositional(String),
+    /// Callback error
+    Callback(BoxError),
     /// Exit with code
     Exit(i32),
     /// User error
@@ -439,6 +442,7 @@ impl fmt::Display for Error {
             Self::GroupViolation(s) => write!(f, "{s}"),
             Self::MissingPositional(n) => write!(f, "missing positional: {n}"),
             Self::TooManyPositional(n) => write!(f, "too many values for: {n}"),
+            Self::Callback(e) => write!(f, "{e}"),
             Self::Exit(code) => write!(f, "exit {code}"),
             Self::User(s) => write!(f, "{s}"),
         }
@@ -473,7 +477,7 @@ fn apply_env_and_defaults<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, context: &mut Ctx
         if let Some(key) = o.env {
             if let Ok(val) = std::env::var(key) {
                 counts[i] = counts[i].saturating_add(1);
-                (o.cb)(Some(val.as_str()), context)?;
+                (o.cb)(Some(val.as_str()), context).map_err(Error::Callback)?;
             }
         }
     }
@@ -497,7 +501,7 @@ fn apply_env_and_defaults<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, context: &mut Ctx
             }
         }
         counts[i] = counts[i].saturating_add(1);
-        (o.cb)(Some(def), context)?;
+        (o.cb)(Some(def), context).map_err(Error::Callback)?;
     }
     Ok(())
 }
@@ -540,7 +544,7 @@ fn parse_long<Ctx: ?Sized, W: std::io::Write>(
     counts[i] = counts[i].saturating_add(1);
     match spec.arg {
         ArgKind::None => {
-            (spec.cb)(None, context)?;
+            (spec.cb)(None, context).map_err(Error::Callback)?;
         }
         ArgKind::Required => {
             let v = if let Some(a) = attached {
@@ -551,7 +555,7 @@ fn parse_long<Ctx: ?Sized, W: std::io::Write>(
             } else {
                 take_next(idx, argv).ok_or_else(|| Error::MissingValue(spec.name.to_string()))?
             };
-            (spec.cb)(Some(v), context)?;
+            (spec.cb)(Some(v), context).map_err(Error::Callback)?;
         }
         ArgKind::Optional => {
             let v = match (attached, argv.get(*idx).copied()) {
@@ -572,7 +576,7 @@ fn parse_long<Ctx: ?Sized, W: std::io::Write>(
                 }
                 _ => None,
             };
-            (spec.cb)(v, context)?;
+            (spec.cb)(v, context).map_err(Error::Callback)?;
         }
     }
     Ok(())
@@ -624,23 +628,23 @@ fn parse_short_cluster<Ctx: ?Sized, W: std::io::Write>(
         counts[oi] = counts[oi].saturating_add(1);
         match spec.arg {
             ArgKind::None => {
-                (spec.cb)(None, context)?;
+                (spec.cb)(None, context).map_err(Error::Callback)?;
             }
             ArgKind::Required => {
                 if i < s.len() {
                     let rem = &s[i..];
-                    (spec.cb)(Some(rem), context)?;
+                    (spec.cb)(Some(rem), context).map_err(Error::Callback)?;
                     return Ok(());
                 }
                 let v = take_next(idx, argv)
                     .ok_or_else(|| Error::MissingValue(spec.name.to_string()))?;
-                (spec.cb)(Some(v), context)?;
+                (spec.cb)(Some(v), context).map_err(Error::Callback)?;
                 return Ok(());
             }
             ArgKind::Optional => {
                 if i < s.len() {
                     let rem = &s[i..];
-                    (spec.cb)(Some(rem), context)?;
+                    (spec.cb)(Some(rem), context).map_err(Error::Callback)?;
                     return Ok(());
                 }
                 // SPECIAL: if next token is exactly "-", CONSUME it but treat as "no value".
@@ -663,7 +667,7 @@ fn parse_short_cluster<Ctx: ?Sized, W: std::io::Write>(
                     }
                     _ => None,
                 };
-                (spec.cb)(v.map(|v| &**v), context)?;
+                (spec.cb)(v.map(|v| &**v), context).map_err(Error::Callback)?;
                 return Ok(());
             }
         }
