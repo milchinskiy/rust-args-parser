@@ -245,7 +245,11 @@ fn user_error_bubbles_up() {
     let mut out = Vec::<u8>::new();
     match dispatch_to(&env, &cmd, &["--boom"], &mut u, &mut out) {
         Err(Error::Callback(e)) => {
-            assert!(e.to_string().contains("bad"));
+            if let Some(ee) = e.downcast_ref::<AppError>() {
+                match ee {
+                    AppError::User(msg) => assert_eq!(*msg, "bad"),
+                }
+            }
         }
         other => panic!("unexpected: {other:?}"),
     }
