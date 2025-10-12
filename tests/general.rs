@@ -186,7 +186,7 @@ fn subcommand_unknown_option_errors() {
     let mut out = Vec::<u8>::new();
     let e = dispatch_to(&env, &root, &["sub", "-Z"], &mut u, &mut out).unwrap_err();
     match e {
-        Error::UnknownOption(s) => assert_eq!(s, "-Z"),
+        Error::UnknownOption { token: s, .. } => assert_eq!(s, "-Z"),
         _ => panic!("expected UnknownOption"),
     }
 }
@@ -266,7 +266,7 @@ fn unknown_short_inside_cluster() {
     let mut out = Vec::<u8>::new();
     let e = dispatch_to(&env, &cmd, &["-vZ"], &mut u, &mut out).unwrap_err();
     match e {
-        Error::UnknownOption(s) => assert_eq!(s, "-Z"),
+        Error::UnknownOption { token: s, .. } => assert_eq!(s, "-Z"),
         _ => panic!("expected UnknownOption"),
     }
 }

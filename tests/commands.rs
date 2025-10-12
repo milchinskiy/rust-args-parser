@@ -43,7 +43,7 @@ fn unknown_command_when_no_positionals() {
     let mut out = Vec::<u8>::new();
     let e = dispatch_to(&env, &root, &["zzz"], &mut u, &mut out).unwrap_err();
     match e {
-        Error::UnknownCommand(s) => assert_eq!(s, "zzz"),
+        Error::UnknownCommand { token: s, .. } => assert_eq!(s, "zzz"),
         _ => panic!("wrong error"),
     }
 }

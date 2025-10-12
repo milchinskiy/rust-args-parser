@@ -154,7 +154,7 @@ fn unknown_options_long_and_short() {
     let mut out1 = Vec::<u8>::new();
     let e1 = dispatch_to(&env, &root, &["--nope"], &mut u1, &mut out1).unwrap_err();
     match e1 {
-        Error::UnknownOption(s) => assert_eq!(s, "--nope"),
+        Error::UnknownOption { token: s, .. } => assert_eq!(s, "--nope"),
         _ => panic!("wrong error"),
     }
 
@@ -162,7 +162,7 @@ fn unknown_options_long_and_short() {
     let mut out2 = Vec::<u8>::new();
     let e2 = dispatch_to(&env, &root, &["-1"], &mut u2, &mut out2).unwrap_err();
     match e2 {
-        Error::UnknownOption(s) => assert_eq!(s, "-1"),
+        Error::UnknownOption { token: s, .. } => assert_eq!(s, "-1"),
         _ => panic!("wrong error"),
     }
 }

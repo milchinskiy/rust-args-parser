@@ -13,6 +13,7 @@ This crate is a small, pragmatic alternative to heavy frameworks when you want:
 - **Exclusive / required groups** (`at_most_one(group)`, `at_least_one(group)`)
 - **Environment / default** application (`.env("NAME")`, `.default("value")`)
 - **Positionals schema** with ranges (`PosSpec::new("FILE").range(1, 10)`)
+- **Typo hints** and structured error variants for unknown options/commands (from version 0.3.0)
 - Built-ins: `-h/--help`, `-V/--version`, `-A/--author` when enabled in `Env`
 
 It's inspired by the author's C library **[c-args-parser](https://github.com/milchinskiy/c-args-parser)**, re-imagined in safe Rust.
@@ -27,6 +28,7 @@ It's inspired by the author's C library **[c-args-parser](https://github.com/mil
 - [Groups (mutually-exclusive / required one)](#groups-mutually-exclusive--required-one)
 - [Environment & defaults](#environment--defaults)
 - [Positionals](#positionals)
+- [Typo hints](#typo-hints)
 - [Behavior details](#behavior-details)
 - [Color & wrapping](#color--wrapping)
 - [Errors](#errors)
@@ -184,6 +186,105 @@ ap::PosSpec::new("PATH").desc("Input path");
 ```
 
 If no positional schema is declared for a command, any leftover bare token becomes an error.
+
+---
+
+## Typo hints (≥ 0.3.0)
+
+### What changed (breaking)
+
+The two error variants for unknown flags/commands now carry the exact token and a list of suggestions:
+
+```rust
+pub enum Error {
+    UnknownOption { token: String, suggestions: Vec<String> },
+    UnknownCommand { token: String, suggestions: Vec<String> },
+    // …other variants unchanged…
+}
+```
+
+This is a source-compatible change if you only format the error (`{err}`), but a pattern‑matching breaking change if you match on the variants. See migration below.
+
+### Migration guide
+
+Before (≤ 0.2.x):
+
+```rust
+match err {
+    ap::Error::UnknownOption(tok) => eprintln!("unknown option: {tok}"),
+    ap::Error::UnknownCommand(tok) => eprintln!("unknown command: {tok}"),
+    _ => {}
+}
+```
+
+After (≥ 0.3.0):
+
+```rust
+match err {
+    ap::Error::UnknownOption { token, suggestions } => {
+        if suggestions.is_empty() {
+            eprintln!("unknown option: {token}");
+        } else {
+            eprintln!("unknown option: {token}. Did you mean {}?",
+            format_alternates(&suggestions));
+        }
+    }
+    ap::Error::UnknownCommand { token, suggestions } => {
+        if suggestions.is_empty() {
+            eprintln!("unknown command: {token}");
+        } else {
+            eprintln!("unknown command: {token}. Did you mean {}?",
+            format_alternates(&suggestions));
+        }
+    }
+    _ => {}
+}
+
+
+fn format_alternates(items: &[String]) -> String {
+    match items.len() {
+        0 => String::new(),
+        1 => format!("'{}'", items[0]),
+        2 => format!("'{}' or '{}'", items[0], items[1]),
+        _ => {
+            let mut s = String::new();
+            for (i, it) in items.iter().enumerate() {
+                if i > 0 { s.push_str(if i + 1 == items.len() { ", or " } else { ", " }); }
+                s.push('\''); s.push_str(it); s.push('\'');
+            }
+            s
+        }
+    }
+}
+```
+
+> Tip: If you only ever print `err` with `{}` via `Display`, you don't need to change anything—messages now automatically include suggestions when available.
+
+### Where suggestions come from
+
+- **Long/short options**: taken strictly from the current command's `opts`, plus built‑ins (`--help/-h`, `--version/-V`, `--author/-A`) only if enabled in `Env`.
+- **Commands**: taken from the current command's `subs` (`names` and `aliases`).
+- Suggestions are formatted exactly as users should type them: `--long`, `-x`, `start`.
+- Hints are computed only on the error path. Normal parsing paths incur no extra overhead.
+
+### Heuristics (succinct)
+
+- Distance metric: small Levenshtein threshold based on token length (≤1 for short tokens, ≤2 for medium, ≤3 for long).
+- Up to 3 closest items are shown; ties are ordered by distance.
+- No cross-kind suggestions (a mistyped --long doesn’t suggest commands, and vice versa).
+
+### Examples
+
+```
+$ demo --vers
+error: unknown option: '--vers'. Did you mean '--version'?
+
+$ demo -H
+error: unknown option: '-H'. Did you mean '-h'?
+
+$ demo remot
+error: unknown command: remot. Did you mean 'remote'?
+```
 
 ---
 

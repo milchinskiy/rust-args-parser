@@ -52,5 +52,8 @@ fn main() {
     .pos([ap::PosSpec::new("FILE").range(1, 10)]);
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let cli_args: Vec<&str> = argv.iter().map(String::as_str).collect();
-    let _ = ap::dispatch(&env, &root, &cli_args, &mut app);
+    if let Err(error) = ap::dispatch(&env, &root, &cli_args, &mut app) {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
 }

@@ -15,7 +15,8 @@ type BoxError = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Each option/flag invokes a callback.
-pub type OptCallback<Ctx> = for<'a> fn(Option<&'a str>, &mut Ctx) -> std::result::Result<(), BoxError>;
+pub type OptCallback<Ctx> =
+    for<'a> fn(Option<&'a str>, &mut Ctx) -> std::result::Result<(), BoxError>;
 
 /// Command runner for the resolved command (receives final positionals).
 pub type RunCallback<Ctx> = fn(&[&str], &mut Ctx) -> std::result::Result<(), BoxError>;
@@ -62,7 +63,7 @@ pub struct OptSpec<'a, Ctx: ?Sized> {
     group_id: u16,            // 0 = none, >0 = group identifier
     group_mode: GroupMode,    // XOR / REQ_ONE semantics
     value_hint: ValueHint,    // value hint
-    cb: OptCallback<Ctx>,       // callback on set/apply
+    cb: OptCallback<Ctx>,     // callback on set/apply
 }
 
 impl<'a, Ctx: ?Sized> OptSpec<'a, Ctx> {
@@ -347,7 +348,7 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
     if !cmd.subs.is_empty() && cmd.pos.is_empty() && idx < argv.len() {
         let tok = argv[idx];
         if !tok.starts_with('-') && tok != "--" && find_sub(cmd, tok).is_none() {
-            return Err(Error::UnknownCommand(tok.to_string()));
+            return Err(unknown_command_error(cmd, tok));
         }
     }
     // small counter array parallel to opts
@@ -406,19 +407,161 @@ pub fn dispatch<Ctx>(
     dispatch_to(env, root, argv, context, &mut out)
 }
 
+/* ================================ Suggestions ===================================== */
+#[inline]
+fn format_alternates(items: &[String]) -> String {
+    match items.len() {
+        0 => String::new(),
+        1 => format!("'{}'", items[0]),
+        2 => format!("'{}' or '{}'", items[0], items[1]),
+        _ => {
+            // 'a', 'b', or 'c'
+            let mut s = String::new();
+            for (i, it) in items.iter().enumerate() {
+                if i > 0 {
+                    s.push_str(if i + 1 == items.len() { ", or " } else { ", " });
+                }
+                s.push('\'');
+                s.push_str(it);
+                s.push('\'');
+            }
+            s
+        }
+    }
+}
+
+#[inline]
+const fn max_distance_for(len: usize) -> usize {
+    match len {
+        0..=3 => 1,
+        4..=6 => 2,
+        _ => 3,
+    }
+}
+
+// Simple Levenshtein (O(n*m)); inputs are tiny (flags/commands), so it's fine.
+fn lev(a: &str, b: &str) -> usize {
+    let (na, nb) = (a.len(), b.len());
+    if na == 0 {
+        return nb;
+    }
+    if nb == 0 {
+        return na;
+    }
+    let mut prev: Vec<usize> = (0..=nb).collect();
+    let mut curr = vec![0; nb + 1];
+    for (i, ca) in a.chars().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.chars().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[nb]
+}
+
+fn collect_long_candidates<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>) -> Vec<String> {
+    let mut v = Vec::with_capacity(cmd.opts.len() + 3);
+    if env.auto_help {
+        v.push("help".to_string());
+    }
+    if env.version.is_some() {
+        v.push("version".to_string());
+    }
+    if env.author.is_some() {
+        v.push("author".to_string());
+    }
+    for o in &cmd.opts {
+        v.push(o.name.to_string());
+    }
+    v
+}
+
+fn collect_short_candidates<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>) -> Vec<char> {
+    let mut v = Vec::with_capacity(cmd.opts.len() + 3);
+    if env.auto_help {
+        v.push('h');
+    }
+    if env.version.is_some() {
+        v.push('V');
+    }
+    if env.author.is_some() {
+        v.push('A');
+    }
+    for o in &cmd.opts {
+        if let Some(ch) = o.short {
+            v.push(ch);
+        }
+    }
+    v
+}
+
+fn collect_cmd_candidates<'a, Ctx: ?Sized>(cmd: &'a CmdSpec<'a, Ctx>) -> Vec<&'a str> {
+    let mut v = Vec::with_capacity(cmd.subs.len());
+    for s in &cmd.subs {
+        if let Some(n) = s.name {
+            v.push(n);
+        }
+        for &al in &s.aliases {
+            v.push(al);
+        }
+    }
+    v
+}
+
+fn suggest_longs<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, name: &str) -> Vec<String> {
+    let thr = max_distance_for(name.len());
+    let mut scored: Vec<(usize, String)> = collect_long_candidates(env, cmd)
+        .into_iter()
+        .map(|cand| (lev(name, &cand), format!("--{cand}")))
+        .collect();
+    scored.sort_by_key(|(d, _)| *d);
+    scored.into_iter().take_while(|(d, _)| *d <= thr).take(3).map(|(_, s)| s).collect()
+}
+
+fn suggest_shorts<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, ch: char) -> Vec<String> {
+    let mut v: Vec<(usize, String)> = collect_short_candidates(env, cmd)
+        .into_iter()
+        .map(|c| (usize::from(c != ch), format!("-{c}")))
+        .collect();
+    v.sort_by_key(|(d, _)| *d);
+    v.into_iter().take_while(|(d, _)| *d <= 1).take(3).map(|(_, s)| s).collect()
+}
+
+fn suggest_cmds<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, tok: &str) -> Vec<String> {
+    let thr = max_distance_for(tok.len());
+    let mut v: Vec<(usize, String)> = collect_cmd_candidates(cmd)
+        .into_iter()
+        .map(|cand| (lev(tok, cand), cand.to_string()))
+        .collect();
+    v.sort_by_key(|(d, _)| *d);
+    v.into_iter().take_while(|(d, _)| *d <= thr).take(3).map(|(_, s)| s).collect()
+}
+
 /* ================================ Errors ===================================== */
 #[non_exhaustive]
 #[derive(Debug)]
 /// Error type
 pub enum Error {
-    /// Unknown option
-    UnknownOption(String),
     /// Missing value
     MissingValue(String),
     /// Unexpected argument
     UnexpectedArgument(String),
+    /// Unknown option
+    UnknownOption {
+        /// Token
+        token: String,
+        /// Suggestions
+        suggestions: Vec<String>,
+    },
     /// Unknown command
-    UnknownCommand(String),
+    UnknownCommand {
+        /// Token
+        token: String,
+        /// Suggestions
+        suggestions: Vec<String>,
+    },
     /// Group violation
     GroupViolation(String),
     /// Missing positional
@@ -435,10 +578,22 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownOption(s) => write!(f, "unknown option: '{s}'"),
+            Self::UnknownOption { token, suggestions } => {
+                write!(f, "unknown option: '{token}'")?;
+                if !suggestions.is_empty() {
+                    write!(f, ". Did you mean {}?", format_alternates(suggestions))?;
+                }
+                Ok(())
+            }
             Self::MissingValue(n) => write!(f, "missing value for --{n}"),
             Self::UnexpectedArgument(s) => write!(f, "unexpected argument: {s}"),
-            Self::UnknownCommand(s) => write!(f, "unknown command: {s}"),
+            Self::UnknownCommand { token, suggestions } => {
+                write!(f, "unknown command: {token}")?;
+                if !suggestions.is_empty() {
+                    write!(f, ". Did you mean {}?", format_alternates(suggestions))?;
+                }
+                Ok(())
+            }
             Self::GroupViolation(s) => write!(f, "{s}"),
             Self::MissingPositional(n) => write!(f, "missing positional: {n}"),
             Self::TooManyPositional(n) => write!(f, "too many values for: {n}"),
@@ -451,7 +606,10 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /* ================================ Parsing ==================================== */
-fn find_sub<'a, Ctx: ?Sized>(cmd: &'a CmdSpec<'a, Ctx>, name: &str) -> Option<&'a CmdSpec<'a, Ctx>> {
+fn find_sub<'a, Ctx: ?Sized>(
+    cmd: &'a CmdSpec<'a, Ctx>,
+    name: &str,
+) -> Option<&'a CmdSpec<'a, Ctx>> {
     for c in &cmd.subs {
         if let Some(n) = c.name {
             if n == name {
@@ -464,7 +622,11 @@ fn find_sub<'a, Ctx: ?Sized>(cmd: &'a CmdSpec<'a, Ctx>, name: &str) -> Option<&'
     }
     None
 }
-fn apply_env_and_defaults<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, context: &mut Ctx, counts: &mut [u8]) -> Result<()> {
+fn apply_env_and_defaults<Ctx: ?Sized>(
+    cmd: &CmdSpec<'_, Ctx>,
+    context: &mut Ctx,
+    counts: &mut [u8],
+) -> Result<()> {
     if cmd.opts.is_empty() {
         return Ok(());
     }
@@ -539,7 +701,7 @@ fn parse_long<Ctx: ?Sized, W: std::io::Write>(
     }
     let (i, spec) = match cmd.opts.iter().enumerate().find(|(_, o)| o.name == name) {
         Some(x) => x,
-        None => return Err(unknown_long_error(name)),
+        None => return Err(unknown_long_error(env, cmd, name)),
     };
     counts[i] = counts[i].saturating_add(1);
     match spec.arg {
@@ -623,7 +785,7 @@ fn parse_short_cluster<Ctx: ?Sized, W: std::io::Write>(
         }
         let (oi, spec) = match lookup_short(cmd, &short_idx, ch) {
             Some(x) => x,
-            None => return Err(unknown_short_error(ch)),
+            None => return Err(unknown_short_error(env, cmd, ch)),
         };
         counts[oi] = counts[oi].saturating_add(1);
         match spec.arg {
@@ -1123,22 +1285,29 @@ pub fn print_author_to<W: Write>(env: &Env<'_>, mut out: W) {
 }
 #[cold]
 #[inline(never)]
-fn unknown_long_error(name: &str) -> Error {
-    Error::UnknownOption({
+fn unknown_long_error<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, name: &str) -> Error {
+    let token = {
         let mut s = String::with_capacity(2 + name.len());
         s.push_str("--");
         s.push_str(name);
         s
-    })
+    };
+    let suggestions = suggest_longs(env, cmd, name);
+    Error::UnknownOption { token, suggestions }
 }
 
 #[cold]
 #[inline(never)]
-fn unknown_short_error(ch: char) -> Error {
-    Error::UnknownOption({
-        let mut s = String::with_capacity(2);
-        s.push('-');
-        s.push(ch);
-        s
-    })
+fn unknown_short_error<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, ch: char) -> Error {
+    let mut token = String::with_capacity(2);
+    token.push('-');
+    token.push(ch);
+    let suggestions = suggest_shorts(env, cmd, ch);
+    Error::UnknownOption { token, suggestions }
+}
+
+#[cold]
+#[inline(never)]
+fn unknown_command_error<Ctx: ?Sized>(cmd: &CmdSpec<'_, Ctx>, tok: &str) -> Error {
+    Error::UnknownCommand { token: tok.to_string(), suggestions: suggest_cmds(cmd, tok) }
 }
