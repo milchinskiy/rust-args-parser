@@ -25,7 +25,7 @@ fn optional_short_consumes_lone_dash_as_none() {
         OptSpec::new("jobs", cb_jobs).short('j').optional().numeric(),
         OptSpec::new("verbose", cb_verbose).short('v').flag(),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -40,7 +40,7 @@ fn optional_short_consumes_lone_dash_as_none() {
 fn short_attached_negative_value_in_cluster() {
     let env = env_base();
     let opts = [OptSpec::new("jobs", cb_jobs).short('j').optional().numeric()];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -54,7 +54,7 @@ fn short_attached_negative_value_in_cluster() {
 fn verbose_repeated_flag_counts() {
     let env = env_base();
     let opts = [OptSpec::new("verbose", cb_verbose).short('v').flag()];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -72,7 +72,7 @@ fn required_one_satisfied_by_default() {
         OptSpec::new("def", cb_defv).default("D").at_least_one(7),
         OptSpec::new("yy", cb_one_b).at_least_one(7),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -109,7 +109,7 @@ fn long_optional_consumes_lone_dash_as_none() {
         OptSpec::new("jobs", cb_jobs).optional().numeric(),
         OptSpec::new("verbose", cb_verbose).short('v').flag(),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -126,7 +126,7 @@ fn default_suppressed_when_explicit_in_xor_group() {
         OptSpec::new("def", cb_defv).default("D").at_most_one(3),
         OptSpec::new("x", cb_one_a).flag().at_most_one(3),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -147,7 +147,7 @@ fn required_one_satisfied_by_env() {
         OptSpec::new("envd", cb_envd).env(key).at_least_one(4),
         OptSpec::new("yy", cb_one_b).at_least_one(4),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -198,7 +198,7 @@ fn short_optional_then_another_short_option() {
         OptSpec::new("jobs", cb_jobs).short('j').optional().numeric(),
         OptSpec::new("verbose", cb_verbose).short('v').flag(),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -213,7 +213,7 @@ fn short_optional_then_another_short_option() {
 fn long_optional_plus_number_consumed() {
     let env = env_base();
     let opts = [OptSpec::new("jobs", cb_jobs).optional().numeric()];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -279,7 +279,7 @@ fn cluster_flag_then_required_value() {
         OptSpec::new("verbose", cb_verbose).short('v').flag(),
         OptSpec::new("output", cb_output).short('o').required().metavar("FILE"),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -294,7 +294,7 @@ fn cluster_flag_then_required_value() {
 fn repeated_long_flags_increment() {
     let env = env_base();
     let opts = [OptSpec::new("verbose", cb_verbose).flag().help("inc")];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -344,7 +344,7 @@ fn non_ascii_short_flag_and_cluster() {
         OptSpec::new("x", cb_verbose).short('Ж').flag().help("Cyrillic short"),
         OptSpec::new("v", cb_verbose).short('v').flag(),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u1 = U::default();
     let mut out1 = Vec::<u8>::new();
@@ -392,7 +392,7 @@ fn help_positional_variants_desc_optional_required_minmax() {
 fn optional_numeric_accepts_scientific_and_dot_forms() {
     let env = env_base();
     let opts = [OptSpec::new("jobs", cb_jobs).short('j').optional().numeric()];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     // long: 1e-3
     let mut u1 = U::default();

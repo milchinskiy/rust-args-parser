@@ -14,7 +14,7 @@ fn flags_and_required_values_long_short() {
             .metavar("N")
             .help("parallel jobs"),
     ];
-    let root = CmdSpec::new(None, None).desc("root").opts(opts);
+    let root = CmdSpec::new(None, Some(run_cb)).desc("root").opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -35,7 +35,7 @@ fn long_required_eq_and_space_and_missing() {
         .required()
         .metavar("FILE")
         .help("output file")];
-    let root = CmdSpec::new(None, None).opts(opts);
+    let root = CmdSpec::new(None, Some(run_cb)).opts(opts);
 
     let mut u1 = U::default();
     let mut out1 = Vec::<u8>::new();
@@ -62,7 +62,7 @@ fn long_required_eq_and_space_and_missing() {
 fn short_required_attached_and_space() {
     let env = env_base();
     let opts = [OptSpec::new("output", cb_output).short('o').required().metavar("FILE")];
-    let root = CmdSpec::new(None, None).opts(opts);
+    let root = CmdSpec::new(None, Some(run_cb)).opts(opts);
 
     let mut u1 = U::default();
     let mut out1 = Vec::<u8>::new();
@@ -81,7 +81,7 @@ fn short_required_attached_and_space() {
 fn optional_values_detection_and_negative_numbers() {
     let env = env_base();
     let opts = [OptSpec::new("jobs", cb_jobs).short('j').optional().numeric().metavar("N")];
-    let root = CmdSpec::new(None, None).opts(opts);
+    let root = CmdSpec::new(None, Some(run_cb)).opts(opts);
 
     // --jobs -1 (long optional picks numeric-looking token)
     let mut u1 = U::default();
@@ -119,7 +119,7 @@ fn clustered_shorts_mixed() {
         OptSpec::new("verbose", cb_verbose).short('v').flag(),
         OptSpec::new("jobs", cb_jobs).short('j').optional().numeric(),
     ];
-    let root = CmdSpec::new(None, None).opts(opts);
+    let root = CmdSpec::new(None, Some(run_cb)).opts(opts);
 
     let mut u = U::default();
     let mut out = Vec::<u8>::new();
@@ -176,7 +176,7 @@ fn groups_xor_and_required_one() {
         OptSpec::new("x", cb_one_a).at_least_one(2),
         OptSpec::new("y", cb_one_b).at_least_one(2),
     ];
-    let cmd = CmdSpec::new(None, None).opts(&opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(&opts);
 
     let mut u1 = U::default();
     let mut out1 = Vec::<u8>::new();
@@ -209,7 +209,7 @@ fn env_and_default_applied_and_counted_in_groups() {
         OptSpec::new("envd", cb_envd).env(key).at_most_one(1),
         OptSpec::new("def", cb_defv).default("D").at_most_one(1),
     ];
-    let cmd = CmdSpec::new(None, None).opts(opts);
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(()))).opts(opts);
 
     let mut u1 = U::default();
     let mut out1 = Vec::<u8>::new();

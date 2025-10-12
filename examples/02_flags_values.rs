@@ -9,7 +9,7 @@ struct App {
 fn main() {
     let mut app = App::default();
     let env = ap::Env::new("flags-values").version("0.1.0").auto_help(true).auto_color();
-    let root = ap::CmdSpec::new(None, None)
+    let root = ap::CmdSpec::new(None, Some(|_, _| Ok(())))
         .desc("Flags, required and optional values; short clusters like -vvv, -n10")
         .opts([
             ap::OptSpec::new("verbose", |_, u: &mut App| {

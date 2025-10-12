@@ -333,10 +333,11 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
     out: &mut W,
 ) -> Result<()> {
     let mut idx = 0usize;
-    // descend into subcommands first
     let mut cmd = root;
+    let mut chain: Vec<&str> = Vec::new();
     while idx < argv.len() {
         if let Some(next) = find_sub(cmd, argv[idx]) {
+            chain.push(argv[idx]);
             cmd = next;
             idx += 1;
         } else {
@@ -366,12 +367,12 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
             }
             if tok.starts_with("--") {
                 idx += 1;
-                parse_long(env, cmd, tok, &mut idx, argv, context, &mut gcounts, out)?;
+                parse_long(env, cmd, tok, &mut idx, argv, context, &mut gcounts, out, &chain)?;
                 continue;
             }
             if is_short_like(tok) {
                 idx += 1;
-                parse_short_cluster(env, cmd, tok, &mut idx, argv, context, &mut gcounts, out)?;
+                parse_short_cluster(env, cmd, tok, &mut idx, argv, context, &mut gcounts, out, &chain)?;
                 continue;
             }
         }
@@ -391,7 +392,10 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
     if let Some(run) = cmd.run {
         return run(&pos, context).map_err(Error::Callback);
     }
-    Ok(())
+    if env.auto_help {
+        print_help_to(env, cmd, &chain, out);
+    }
+    Err(Error::Exit(1))
 }
 
 /// Default dispatch that prints auto help/version/author to **stdout**.
@@ -678,6 +682,7 @@ fn parse_long<Ctx: ?Sized, W: std::io::Write>(
     context: &mut Ctx,
     counts: &mut [u8],
     out: &mut W,
+    chain: &[&str],
 ) -> Result<()> {
     // formats: --name, --name=value, --name value
     let s = &tok[2..];
@@ -688,7 +693,7 @@ fn parse_long<Ctx: ?Sized, W: std::io::Write>(
         .map_or((s, None), |eq| (&s[..eq], Some(&s[eq + 1..])));
     // built‑ins
     if env.auto_help && name == "help" {
-        print_help_to(env, cmd, out);
+        print_help_to(env, cmd, chain, out);
         return Err(Error::Exit(0));
     }
     if env.version.is_some() && name == "version" {
@@ -754,6 +759,7 @@ fn parse_short_cluster<Ctx: ?Sized, W: std::io::Write>(
     context: &mut Ctx,
     counts: &mut [u8],
     out: &mut W,
+    chain: &[&str],
 ) -> Result<()> {
     // formats: -abc, -j10, -j 10, -j -12  (no -j=10 by design)
     let short_idx = build_short_idx(cmd);
@@ -772,7 +778,7 @@ fn parse_short_cluster<Ctx: ?Sized, W: std::io::Write>(
 
         // built‑ins
         if env.auto_help && ch == 'h' {
-            print_help_to(env, cmd, out);
+            print_help_to(env, cmd, chain, out);
             return Err(Error::Exit(0));
         }
         if env.version.is_some() && ch == 'V' {
@@ -1172,15 +1178,20 @@ fn write_row(
 /// Print help to the provided writer.
 #[cold]
 #[inline(never)]
-pub fn print_help_to<Ctx: ?Sized, W: Write>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>, mut out: W) {
+pub fn print_help_to<Ctx: ?Sized, W: Write>(
+    env: &Env<'_>,
+    cmd: &CmdSpec<'_, Ctx>,
+    path: &[&str],
+    mut out: W,
+) {
     let mut buf = String::new();
     let _ = write!(
         buf,
         "Usage: {}",
         colorize(env.name, [C_BOLD, C_BRIGHT_WHITE].concat().as_str(), env)
     );
-    if let Some(name) = cmd.name {
-        let _ = write!(buf, " {}", colorize(name, C_MAGENTA, env));
+    for tok in path {
+        let _ = write!(buf, " {}", colorize(tok, C_MAGENTA, env));
     }
     if !cmd.subs.is_empty() {
         let _ = write!(buf, " {}", colorize("<command>", C_MAGENTA, env));

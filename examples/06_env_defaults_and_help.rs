@@ -15,7 +15,7 @@ fn main() {
         .auto_color()
         .wrap_cols(100);
 
-    let root = ap::CmdSpec::new(None, None)
+    let root = ap::CmdSpec::new(None, Some(|_, _| Ok(())))
         .desc(
             "Demonstrates environment and defaults; built-ins -h/--help, -V/--version, -A/--author",
         )

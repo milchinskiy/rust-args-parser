@@ -55,7 +55,7 @@ fn main() -> ap::Result<()> {
         .auto_help(true)
         .auto_color();
 
-    let root = ap::CmdSpec::new(None, None)
+    let root = ap::CmdSpec::new(None, Some(|_, u: &mut App| { Ok(()) }))
         .desc("Demo tool")
         .opts([
             // -v, --verbose (flag)
@@ -127,7 +127,7 @@ Compose subcommands by nesting `CmdSpec`:
 
 ```rust
 let remote_add = ap::CmdSpec::new(Some("add"), Some(|pos, _u: &mut App| {
-    println!("remote add: {}", pos.get(0).unwrap_or(&""));
+    println!("remote add: {}", pos.get(0).unwrap_or(""));
     Ok(())
 }))
 .pos([ap::PosSpec::new("URL").one().desc("Remote URL")]);

@@ -31,7 +31,7 @@ fn argv_heavy_cases() -> Vec<Vec<&'static str>> {
 fn rap_schema<'a, U>() -> (rust_args_parser::Env<'a>, rust_args_parser::CmdSpec<'a, U>) {
     use rust_args_parser::{CmdSpec, Env, OptSpec};
     let env = Env::new("prog").wrap_cols(0).color(false);
-    let cmd = CmdSpec::new(None, None)
+    let cmd = CmdSpec::new(None, Some(|_,_| Ok(())))
         .opts([
             OptSpec::new("verbose", |v, _| {
                 assert!(v.is_none());

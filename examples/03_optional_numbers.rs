@@ -8,7 +8,7 @@ struct App {
 fn main() {
     let mut app = App::default();
     let env = ap::Env::new("optional-numbers").auto_help(true).auto_color();
-    let root = ap::CmdSpec::new(None, None)
+    let root = ap::CmdSpec::new(None, Some(|_, _| Ok(())))
         .desc("Optional numeric value consumption: --thres[=X] or --thres -0.25 etc.")
         .opts([ap::OptSpec::new("thres", |v, u: &mut App| {
             u.threshold = v.map(|s| s.parse().unwrap());

@@ -8,7 +8,7 @@ struct App {
 fn main() {
     let mut app = App::default();
     let env = ap::Env::new("groups").auto_help(true).auto_color();
-    let root = ap::CmdSpec::new(None, None)
+    let root = ap::CmdSpec::new(None, Some(|_, _| Ok(())))
         .desc("Mutually-exclusive and required-one groups")
         .opts([
             ap::OptSpec::new("color", |_, _u: &mut App| Ok(())).help("Force color").at_most_one(1),

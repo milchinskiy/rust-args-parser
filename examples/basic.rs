@@ -21,7 +21,7 @@ fn main() {
         }),
     )
     .desc(DESC)
-    .subs([ap::CmdSpec::new(Some("sub"), None).desc("subcommand description")])
+    .subs([ap::CmdSpec::new(Some("sub"), Some(|_, _| Ok(()))).desc("subcommand description")])
     .opts([
         ap::OptSpec::new("verbose", |_, u: &mut App| {
             u.verbose = true;
