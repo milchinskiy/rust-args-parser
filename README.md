@@ -28,7 +28,7 @@ It's inspired by the author's C library **[c-args-parser](https://github.com/mil
 - [Groups (mutually-exclusive / required one)](#groups-mutually-exclusive--required-one)
 - [Environment & defaults](#environment--defaults)
 - [Positionals](#positionals)
-- [Typo hints](#typo-hints)
+- [Typo hints](#typo-hints--030)
 - [Behavior details](#behavior-details)
 - [Color & wrapping](#color--wrapping)
 - [Errors](#errors)
