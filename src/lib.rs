@@ -372,7 +372,17 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
             }
             if is_short_like(tok) {
                 idx += 1;
-                parse_short_cluster(env, cmd, tok, &mut idx, argv, context, &mut gcounts, out, &chain)?;
+                parse_short_cluster(
+                    env,
+                    cmd,
+                    tok,
+                    &mut idx,
+                    argv,
+                    context,
+                    &mut gcounts,
+                    out,
+                    &chain,
+                )?;
                 continue;
             }
         }
@@ -470,10 +480,8 @@ fn collect_long_candidates<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>) -
     if env.auto_help {
         v.push("help".to_string());
     }
-    if env.version.is_some() {
+    if cmd.name.is_none() {
         v.push("version".to_string());
-    }
-    if env.author.is_some() {
         v.push("author".to_string());
     }
     for o in &cmd.opts {
@@ -487,10 +495,8 @@ fn collect_short_candidates<Ctx: ?Sized>(env: &Env<'_>, cmd: &CmdSpec<'_, Ctx>) 
     if env.auto_help {
         v.push('h');
     }
-    if env.version.is_some() {
+    if cmd.name.is_none() {
         v.push('V');
-    }
-    if env.author.is_some() {
         v.push('A');
     }
     for o in &cmd.opts {
@@ -696,13 +702,15 @@ fn parse_long<Ctx: ?Sized, W: std::io::Write>(
         print_help_to(env, cmd, chain, out);
         return Err(Error::Exit(0));
     }
-    if env.version.is_some() && name == "version" {
-        print_version_to(env, out);
-        return Err(Error::Exit(0));
-    }
-    if env.author.is_some() && name == "author" {
-        print_author_to(env, out);
-        return Err(Error::Exit(0));
+    if cmd.name.is_none() {
+        if env.version.is_some() && name == "version" {
+            print_version_to(env, out);
+            return Err(Error::Exit(0));
+        }
+        if env.author.is_some() && name == "author" {
+            print_author_to(env, out);
+            return Err(Error::Exit(0));
+        }
     }
     let (i, spec) = match cmd.opts.iter().enumerate().find(|(_, o)| o.name == name) {
         Some(x) => x,
@@ -781,13 +789,15 @@ fn parse_short_cluster<Ctx: ?Sized, W: std::io::Write>(
             print_help_to(env, cmd, chain, out);
             return Err(Error::Exit(0));
         }
-        if env.version.is_some() && ch == 'V' {
-            print_version_to(env, out);
-            return Err(Error::Exit(0));
-        }
-        if env.author.is_some() && ch == 'A' {
-            print_author_to(env, out);
-            return Err(Error::Exit(0));
+        if cmd.name.is_none() {
+            if env.version.is_some() && ch == 'V' {
+                print_version_to(env, out);
+                return Err(Error::Exit(0));
+            }
+            if env.author.is_some() && ch == 'A' {
+                print_author_to(env, out);
+                return Err(Error::Exit(0));
+            }
         }
         let (oi, spec) = match lookup_short(cmd, &short_idx, ch) {
             Some(x) => x,
@@ -1132,9 +1142,6 @@ fn write_wrapped(buf: &mut String, text: &str, indent_cols: usize, wrap_cols: us
     for word in text.split_whitespace() {
         let wlen = word.len();
         if first {
-            for _ in 0..indent_cols {
-                buf.push(' ');
-            }
             buf.push_str(word);
             col = indent_cols + wlen;
             first = false;
@@ -1193,10 +1200,16 @@ pub fn print_help_to<Ctx: ?Sized, W: Write>(
     for tok in path {
         let _ = write!(buf, " {}", colorize(tok, C_MAGENTA, env));
     }
-    if !cmd.subs.is_empty() {
+    let has_subs = !cmd.subs.is_empty();
+    let has_opts = !cmd.opts.is_empty()
+        || env.auto_help
+        || (path.is_empty() && (env.version.is_some() || env.author.is_some()));
+    if has_opts && has_subs {
+        let _ = write!(buf, " {}", colorize("[options]", C_CYAN, env));
         let _ = write!(buf, " {}", colorize("<command>", C_MAGENTA, env));
-    }
-    if !cmd.opts.is_empty() {
+    } else if !has_opts && has_subs {
+        let _ = write!(buf, " {}", colorize("<command>", C_MAGENTA, env));
+    } else if has_opts && !has_subs {
         let _ = write!(buf, " {}", colorize("[options]", C_CYAN, env));
     }
     for p in &cmd.pos {
@@ -1212,30 +1225,38 @@ pub fn print_help_to<Ctx: ?Sized, W: Write>(
     if let Some(desc) = cmd.desc {
         let _ = writeln!(buf, "\n{desc}");
     }
-    if env.auto_help || env.version.is_some() || env.author.is_some() || !cmd.opts.is_empty() {
+    if !cmd.opts.is_empty()
+        || env.auto_help
+        || (cmd.name.is_none() && (env.version.is_some() || env.author.is_some()))
+    {
         print_header(&mut buf, "Options", env);
         let mut width = 0usize;
         if env.auto_help {
             width = width.max("-h, --help".len());
         }
-        if env.version.is_some() {
-            width = width.max("-V, --version".len());
-        }
-        if env.author.is_some() {
-            width = width.max("-A, --author".len());
+        // if cmd is a root command
+        if cmd.name.is_none() {
+            if env.version.is_some() {
+                width = width.max("-V, --version".len());
+            }
+            if env.author.is_some() {
+                width = width.max("-A, --author".len());
+            }
         }
         for o in &cmd.opts {
             width = width.max(plain_opt_label_len(o));
         }
-
         if env.auto_help {
             write_row(&mut buf, env, C_CYAN, "-h, --help", "Show this help and exit", width);
         }
-        if env.version.is_some() {
-            write_row(&mut buf, env, C_CYAN, "-V, --version", "Show version and exit", width);
-        }
-        if env.author.is_some() {
-            write_row(&mut buf, env, C_CYAN, "--author", "Show author and exit", width);
+        // if cmd is a root command
+        if cmd.name.is_none() {
+            if env.version.is_some() {
+                write_row(&mut buf, env, C_CYAN, "-V, --version", "Show version and exit", width);
+            }
+            if env.author.is_some() {
+                write_row(&mut buf, env, C_CYAN, "--author", "Show author and exit", width);
+            }
         }
         for o in &cmd.opts {
             let label = make_opt_label(o);
