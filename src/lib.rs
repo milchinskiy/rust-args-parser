@@ -385,6 +385,18 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
                 )?;
                 continue;
             }
+            if !tok.starts_with('-') && tok != "--" && cmd.pos.is_empty() {
+                if let Some(next) = find_sub(cmd, tok) {
+                    apply_env_and_defaults(cmd, context, &mut gcounts)?;
+                    check_groups(cmd, &gcounts)?;
+                    chain.push(tok);
+                    cmd = next;
+                    idx += 1;
+                    gcounts = vec![0; cmd.opts.len()];
+                    pos.clear();
+                    continue;
+                }
+            }
         }
         pos.push(tok);
         idx += 1;
