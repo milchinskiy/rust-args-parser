@@ -337,6 +337,11 @@ pub fn dispatch_to<Ctx: ?Sized, W: Write>(
     let mut chain: Vec<&str> = Vec::new();
     while idx < argv.len() {
         if let Some(next) = find_sub(cmd, argv[idx]) {
+            if !cmd.opts.is_empty() {
+                let mut tmp = vec![0u8; cmd.opts.len()];
+                apply_env_and_defaults(cmd, context, &mut tmp)?;
+                check_groups(cmd, &tmp)?;
+            }
             chain.push(argv[idx]);
             cmd = next;
             idx += 1;
