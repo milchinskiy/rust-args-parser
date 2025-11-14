@@ -7,10 +7,8 @@ use crate::{Matches, Status, Value};
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 
-#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 /// Parse command line arguments.
 /// # Errors [`Error`]
-/// # Panics
 pub fn parse<'a, Ctx: ?Sized>(
     env: &Env,
     root: &'a CmdSpec<'a, Ctx>,
@@ -18,97 +16,80 @@ pub fn parse<'a, Ctx: ?Sized>(
     ctx: &mut Ctx,
 ) -> Result<Matches> {
     let mut m = Matches::new();
-
-    // Path and current command
-    let mut path: Vec<&str> = vec![];
-    let mut stack: Vec<&CmdSpec<'a, Ctx>> = vec![root];
-    let mut current = *stack.last().unwrap();
-    // Indexes for current command
-    let mut long_ix: HashMap<&'a str, usize> = HashMap::new();
-    let mut short_ix: HashMap<char, usize> = HashMap::new();
-    rebuild_indexes(current, &mut long_ix, &mut short_ix);
-    // Eager overlays for root
-    eager_overlay(&mut m, &[], current, Source::Env);
-    eager_overlay(&mut m, &[], current, Source::Default);
-
+    let mut cursor = ParseCursor::new(root);
+    cursor.eager_overlay_here(&mut m);
     let mut i = 0usize;
-    let mut positional_only = false;
-    let mut pos_idx = 0usize;
-    let mut pos_counts: Vec<usize> = vec![0; current.get_positionals().len()];
-
     while i < argv.len() {
         let tok = &argv[i];
-
-        if !positional_only {
-            // "--" → stop option parsing
+        if !cursor.positional_only {
             if tok == "--" {
                 i += 1;
-                positional_only = true;
+                cursor.positional_only = true;
                 continue;
             }
-            if let Some(e) = try_handle_builtins(env, &stack, current, tok) {
+            if let Some(e) = try_handle_builtins(env, &cursor.stack, cursor.current, tok) {
                 return Err(e);
             }
-            if let Some(sub) = try_select_subcommand(current, tok) {
-                stack.push(sub);
-                path.push(sub.get_name());
-                current = sub;
-                // reset positional counters for new depth
-                pos_idx = 0;
-                pos_counts = vec![0; current.get_positionals().len()];
-                rebuild_indexes(current, &mut long_ix, &mut short_ix);
+            if let Some(sub) = try_select_subcommand(cursor.current, tok) {
+                cursor.descend(sub);
                 i += 1;
-                // eager overlay for the new depth
-                eager_overlay(&mut m, &path, current, Source::Env);
-                eager_overlay(&mut m, &path, current, Source::Default);
-                continue;
-            }
-            if let Some(consumed) = try_parse_long(env, current, &mut m, &path, &long_ix, argv, i)?
-            {
-                i += consumed;
+                cursor.eager_overlay_here(&mut m);
                 continue;
             }
             if let Some(consumed) =
-                try_parse_short_or_numeric(env, current, &mut m, &path, &short_ix, argv, i)?
+                try_parse_long(env, cursor.current, &mut m, &cursor.path, &cursor.long_ix, argv, i)?
             {
                 i += consumed;
                 continue;
             }
-
+            if let Some(consumed) = try_parse_short_or_numeric(
+                env,
+                cursor.current,
+                &mut m,
+                &cursor.path,
+                &cursor.short_ix,
+                argv,
+                i,
+            )? {
+                i += consumed;
+                continue;
+            }
             if let Some(s) = tok.to_str() {
                 if !s.starts_with('-')
-                    && !current.get_subcommands().is_empty()
-                    && current.get_positionals().get(pos_idx).is_none()
+                    && !cursor.current.get_subcommands().is_empty()
+                    && cursor.current.get_positionals().get(cursor.pos_idx).is_none()
                 {
-                    return Err(unknown_command_error(env, s, current));
+                    return Err(unknown_command_error(env, s, cursor.current));
                 }
             }
         }
         // Positional
-        if let Some(consumed) =
-            try_push_positional(current, &mut m, &path, &mut pos_idx, &mut pos_counts, tok)
-        {
+        if let Some(consumed) = try_push_positional(
+            cursor.current,
+            &mut m,
+            &cursor.path,
+            &mut cursor.pos_idx,
+            &mut cursor.pos_counts,
+            tok,
+        ) {
             i += consumed;
             continue;
         }
         return Err(Error::UnexpectedPositional { token: os_dbg(tok) });
     }
 
-    walk_levels(&stack, |path, cmd| {
+    walk_levels(&cursor.stack, |path, cmd| {
         overlay_env_and_defaults(&mut m, path, cmd);
-        Ok(())
+        validate_level(&m, path, cmd)
     })?;
-    walk_levels(&stack, |path, cmd| validate_level(&m, path, cmd))?;
-    walk_levels(&stack, |path, cmd| run_callbacks(&m, path, cmd, ctx))?;
-
+    walk_levels(&cursor.stack, |path, cmd| run_callbacks(&m, path, cmd, ctx))?;
     // Execute **leaf** command handler if any
-    if let Some(leaf) = stack.last() {
+    if let Some(leaf) = cursor.stack.last() {
         if let Some(h) = leaf.get_handler() {
             h(&m, ctx)?;
         }
     }
-
-    m.set_leaf_path(&path);
+    m.set_leaf_path(&cursor.path);
     Ok(m)
 }
 
@@ -602,4 +583,48 @@ fn run_callbacks<'a, Ctx: ?Sized>(
     }
 
     Ok(())
+}
+
+struct ParseCursor<'a, Ctx: ?Sized> {
+    path: Vec<&'a str>,
+    stack: Vec<&'a CmdSpec<'a, Ctx>>,
+    current: &'a CmdSpec<'a, Ctx>,
+    long_ix: HashMap<&'a str, usize>,
+    short_ix: HashMap<char, usize>,
+    positional_only: bool,
+    pos_idx: usize,
+    pos_counts: Vec<usize>,
+}
+
+impl<'a, Ctx: ?Sized> ParseCursor<'a, Ctx> {
+    fn new(root: &'a CmdSpec<'a, Ctx>) -> Self {
+        let mut cur = Self {
+            path: Vec::new(),
+            stack: vec![root],
+            current: root,
+            long_ix: HashMap::new(),
+            short_ix: HashMap::new(),
+            positional_only: false,
+            pos_idx: 0,
+            pos_counts: vec![0; root.get_positionals().len()],
+        };
+        rebuild_indexes(cur.current, &mut cur.long_ix, &mut cur.short_ix);
+        cur
+    }
+    fn rebuild_indexes(&mut self) {
+        rebuild_indexes(self.current, &mut self.long_ix, &mut self.short_ix);
+    }
+    fn descend(&mut self, sub: &'a CmdSpec<'a, Ctx>) {
+        self.stack.push(sub);
+        self.path.push(sub.get_name());
+        self.current = sub;
+        self.positional_only = false;
+        self.pos_idx = 0;
+        self.pos_counts = vec![0; self.current.get_positionals().len()];
+        self.rebuild_indexes();
+    }
+    fn eager_overlay_here(&self, m: &mut Matches) {
+        eager_overlay(m, &self.path, self.current, Source::Env);
+        eager_overlay(m, &self.path, self.current, Source::Default);
+    }
 }
