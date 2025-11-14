@@ -463,7 +463,7 @@ fn validate_level<'a, Ctx: ?Sized>(
         if p.get_cardinality() == (PosCardinality::One { required: true })
             && !m.values.contains_key(&k)
         {
-            return Err(Error::User("missing required positional"));
+            return Err(Error::User("missing required positional".into()));
         }
         if let PosCardinality::Range { min, .. } = p.get_cardinality() {
             let count = match m.values.get(&k) {
@@ -472,7 +472,7 @@ fn validate_level<'a, Ctx: ?Sized>(
                 _ => 0,
             };
             if count < min {
-                return Err(Error::User("positional count below minimum"));
+                return Err(Error::User("positional count below minimum".into()));
             }
         }
     }
@@ -488,10 +488,16 @@ fn validate_level<'a, Ctx: ?Sized>(
         }
         match g.mode {
             GroupMode::Xor if hits > 1 => {
-                return Err(Error::User("options are mutually exclusive"))
+                return Err(Error::User(format!(
+                    "options in group '{}' are mutually exclusive",
+                    g.name
+                )))
             }
             GroupMode::ReqOne if hits == 0 => {
-                return Err(Error::User("one of the options is required"))
+                return Err(Error::User(format!(
+                    "one of the options in group '{}' is required",
+                    g.name
+                )))
             }
             _ => {}
         }

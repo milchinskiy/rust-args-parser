@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_wraps)]
+
 use rust_args_parser as rapp;
 use std::ffi::{OsStr, OsString};
 
@@ -12,7 +14,7 @@ fn set_socket(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
 }
 fn non_empty(v: &OsStr) -> rapp::Result<()> {
     if v.is_empty() {
-        Err(rapp::Error::User("empty value"))
+        Err(rapp::Error::User("empty value".into()))
     } else {
         Ok(())
     }
@@ -38,16 +40,16 @@ fn main() -> rapp::Result<()> {
     match rapp::parse(&env, &root, &argv, &mut ctx) {
         Err(rapp::Error::ExitMsg { code, message }) => {
             if let Some(msg) = message {
-                print!("{}", msg);
+                print!("{msg}");
             }
             std::process::exit(code);
         }
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("error: {e}");
             std::process::exit(2);
         }
         Ok(_) => {}
-    };
+    }
 
     eprintln!("socket = {:?}", ctx.socket);
     Ok(())

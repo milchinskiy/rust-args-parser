@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_wraps)]
+
 use rust_args_parser as rapp;
 use std::ffi::{OsStr, OsString};
 
@@ -26,7 +28,7 @@ fn set_json(c: &mut Ctx) -> rapp::Result<()> {
 
 fn set_jobs(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
     let s = v.to_string_lossy();
-    let n: u32 = s.parse().map_err(|_| rapp::Error::User("invalid number for --jobs"))?;
+    let n: u32 = s.parse().map_err(|_| rapp::Error::User("invalid number for --jobs".into()))?;
     c.jobs = Some(n);
     Ok(())
 }
@@ -41,7 +43,7 @@ fn push_file(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
 
 fn non_empty(v: &OsStr) -> rapp::Result<()> {
     if v.is_empty() {
-        Err(rapp::Error::User("value must be non-empty"))
+        Err(rapp::Error::User("value must be non-empty".into()))
     } else {
         Ok(())
     }

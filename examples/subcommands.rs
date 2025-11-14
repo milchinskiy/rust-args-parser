@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_wraps)]
+
 use rust_args_parser as rapp;
 use std::ffi::{OsStr, OsString};
 

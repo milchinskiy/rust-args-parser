@@ -2,11 +2,11 @@
 #[derive(Debug)]
 pub enum Error {
     /// Invalid CLI input (unknown flag, bad value, missing value, etc.).
-    User(&'static str),
+    User(String),
     /// Arbitrary user error bubbled from callbacks.
     UserAny(Box<dyn std::error::Error + Send + Sync + 'static>),
     /// Internal/structural error (should be rare).
-    Parse(&'static str),
+    Parse(String),
     /// Exit with a specific code (e.g., `--help`). Optional message payload.
     ExitMsg {
         code: i32,
@@ -75,8 +75,8 @@ impl core::fmt::Display for Error {
                 }
                 Ok(())
             }
-            Self::MissingValue { opt } => write!(f, "missing value for option: {opt}"),
-            Self::UnexpectedPositional { token } => write!(f, "unexpected positional: {token}"),
+            Self::MissingValue { opt } => write!(f, "missing value for option: '{opt}'"),
+            Self::UnexpectedPositional { token } => write!(f, "unexpected positional: '{token}'"),
         }
     }
 }

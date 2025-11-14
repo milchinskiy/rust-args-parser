@@ -79,7 +79,7 @@ fn push_chdir(v: &OsStr, c: &mut GitCtx) -> rapp::Result<()> {
 fn push_config(v: &OsStr, c: &mut GitCtx) -> rapp::Result<()> {
     let s = v.to_string_lossy();
     if !s.contains('=') {
-        return Err(rapp::Error::User("expected name=value for -c"));
+        return Err(rapp::Error::User("expected name=value for -c".into()));
     }
     c.global.configs.push(s.into_owned());
     Ok(())
@@ -178,7 +178,7 @@ fn set_log_oneline(c: &mut GitCtx) -> rapp::Result<()> {
 }
 fn set_log_limit(v: &OsStr, c: &mut GitCtx) -> rapp::Result<()> {
     let n: usize =
-        v.to_string_lossy().parse().map_err(|_| rapp::Error::User("-n expects a number"))?;
+        v.to_string_lossy().parse().map_err(|_| rapp::Error::User("-n expects a number".into()))?;
     if let Some(GitExec::Log(ref mut x)) = c.exec {
         x.limit = Some(n);
     }
@@ -324,7 +324,7 @@ fn build_spec<'a>() -> rapp::CmdSpec<'a, GitCtx> {
                     // Example policy: require at least one -m (like scripting UX)
                     if !m.view().values("message").map_or(false, |v| !v.is_empty()) {
                         return Err(rapp::Error::User(
-                            "commit requires at least one -m MSG in this demo",
+                            "commit requires at least one -m MSG in this demo".into(),
                         ));
                     }
                     Ok(())
@@ -383,7 +383,7 @@ fn build_spec<'a>() -> rapp::CmdSpec<'a, GitCtx> {
                     let have_new = v.value("new").is_some();
                     let have_branch = v.value("BRANCH").is_some();
                     if !have_new && !have_branch {
-                        return Err(rapp::Error::User("checkout needs -b NAME or BRANCH"));
+                        return Err(rapp::Error::User("checkout needs -b NAME or BRANCH".into()));
                     }
                     Ok(())
                 }),
