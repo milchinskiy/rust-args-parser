@@ -122,6 +122,7 @@ fn print_usage<Ctx: ?Sized>(out_buf: &mut String, path: &[&str], cmd: &CmdSpec<'
 }
 
 /// Render help with **strict column alignment** based on the *longest* label in the section.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn render_help_with_path<Ctx: ?Sized>(
     env: &Env,
@@ -175,12 +176,27 @@ pub fn render_help_with_path<Ctx: ?Sized>(
         if let Some(mv) = o.get_metavar() {
             meta = Some(mv);
         }
-        rows.push((lab, meta, o.get_help().unwrap_or("").to_string()));
+        let mut desc: Vec<String> = vec![];
+        if let Some(h) = o.get_help() {
+            desc.push(h.to_string());
+        }
+        if let Some(env) = o.get_env() {
+            desc.push(format!("Env: {env}"));
+        }
+        if let Some(d) = o.get_default() {
+            desc.push(format!("Default: {d:?}"));
+        }
+        let desc = desc.join("; ");
+        rows.push((lab, meta, desc));
     }
 
     if !rows.is_empty() {
         let _ = writeln!(out, "{}", paint_section("Options"));
-        let max_raw = rows.iter().map(|(opts, _, _)| opts.join(", ").len()).max().unwrap_or(0);
+        let max_raw = rows
+            .iter()
+            .map(|(opts, pos, _)| opts.join(", ").len() + pos.map_or(0, |s| s.len() + 1))
+            .max()
+            .unwrap_or(0);
         let desc_col = 2 + max_raw + 2; // "  " + label + "  "
         for (lab, pos, desc) in rows {
             let mut painted =
@@ -197,7 +213,6 @@ pub fn render_help_with_path<Ctx: ?Sized>(
     // Arguments
     if !cmd.get_positionals().is_empty() {
         let _ = writeln!(out, "\n{}", paint_section("Arguments"));
-        // Compute max label width among positionals
         let mut prow_labels: Vec<(String, usize, String)> = Vec::new();
         let mut max_raw = 0usize;
         for p in cmd.get_positionals() {
