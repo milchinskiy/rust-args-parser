@@ -59,15 +59,17 @@ fn pos_key_for_strings(path: &[String], name: &str) -> String {
 
 /// All parsed values and their sources. Internally keyed by flattened strings.
 /// We add `leaf_path` so callers can query *scoped* without spelling keys.
+#[derive(Debug)]
 pub struct Matches {
     pub(crate) values: HashMap<String, Value>,
     pub(crate) status: HashMap<String, Status>,
+    pub(crate) flag_counts: HashMap<String, usize>,
     leaf_path: Vec<String>,
 }
 
 impl Matches {
     pub(crate) fn new() -> Self {
-        Self { values: HashMap::new(), status: HashMap::new(), leaf_path: Vec::new() }
+        Self { values: HashMap::new(), status: HashMap::new(), flag_counts: HashMap::new(), leaf_path: Vec::new() }
     }
 
     /// Set the *leaf* (selected) command path. Parser calls this before returning.

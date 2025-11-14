@@ -53,7 +53,7 @@ fn main() {
     let mut env = rapp::Env { version: Some("0.1.0"), ..Default::default() };
     env.wrap_cols = 120;
 
-    let root = rapp::CmdSpec::<'_, Ctx>::new("demo")
+    let root = rapp::CmdSpec::new("demo")
         .help("Demo app showing flags, options, positionals, groups")
         .opt(
             rapp::OptSpec::flag("verbose", set_verbose)

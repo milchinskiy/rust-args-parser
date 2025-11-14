@@ -133,6 +133,7 @@ fn try_handle_builtins<Ctx: ?Sized>(
         }
         #[cfg(not(feature = "help"))]
         {
+            let _ = current;
             return Some(Error::ExitMsg { code: 0, message: None });
         }
     }
@@ -313,9 +314,11 @@ fn eager_overlay<Ctx: ?Sized>(m: &mut Matches, path: &[&str], cmd: &CmdSpec<'_, 
 }
 
 fn set_flag(m: &mut Matches, key: &str, src: Source) {
+    *m.flag_counts.entry(key.to_string()).or_insert(0) += 1;
     m.values.insert(key.to_string(), Value::Flag);
     m.status.insert(key.to_string(), Status::Set(src));
 }
+
 fn set_val(m: &mut Matches, key: &str, val: OsString, src: Source, rep: Repeat) {
     match rep {
         Repeat::Single => {
@@ -385,7 +388,7 @@ fn unknown_long_error<Ctx: ?Sized>(
     Error::UnknownOption { token: format!("--{name}"), suggestions }
 }
 #[cfg(not(feature = "suggest"))]
-fn unknown_long_error<Ctx: ?Sized>(_: &Env, name: &str, _: &CmdSpec<'_, Ctx>) -> Error {
+fn unknown_long_error<Ctx: ?Sized>(_: &Env, name: &str, _: &CmdSpec<'_, Ctx>, _: &[&str]) -> Error {
     Error::UnknownOption { token: format!("--{}", name), suggestions: vec![] }
 }
 
@@ -416,7 +419,7 @@ fn unknown_short_error<Ctx: ?Sized>(
     Error::UnknownOption { token: format!("-{c}"), suggestions }
 }
 #[cfg(not(feature = "suggest"))]
-fn unknown_short_error<Ctx: ?Sized>(_: &Env, c: char, _: &CmdSpec<'_, Ctx>) -> Error {
+fn unknown_short_error<Ctx: ?Sized>(_: &Env, c: char, _: &CmdSpec<'_, Ctx>, _: &[&str]) -> Error {
     Error::UnknownOption { token: format!("-{}", c), suggestions: vec![] }
 }
 
@@ -555,7 +558,10 @@ fn run_callbacks<'a, Ctx: ?Sized>(
         match m.values.get(&k) {
             Some(Value::Flag) => {
                 if let Some(cb) = o.get_on_flag() {
-                    cb(ctx)?;
+                    let n = *m.flag_counts.get(&k).unwrap_or(&1);
+                    for _ in 0..n {
+                        cb(ctx)?;
+                    }
                 }
             }
             Some(Value::One(v)) => {

@@ -27,7 +27,9 @@ default = ["help", "suggest", "color"]
 help = []                              # help renderer (wrapping, sections, optional colors)
 suggest = []                           # did-you-mean distance util
 color = []                             # ANSI styles (opt-in); respects NO_COLOR/CLICOLOR loosely
-completions = []
 
 [dependencies]
 
+[dev-dependencies]
+pretty_assertions = "1"
+proptest = "1"

@@ -152,7 +152,7 @@ impl<'a, Ctx: ?Sized> OptSpec<'a, Ctx> {
         self
     }
     #[must_use]
-    pub fn default_os(mut self, val: impl Into<OsString>) -> Self {
+    pub fn default(mut self, val: impl Into<OsString>) -> Self {
         self.default = Some(val.into());
         self
     }

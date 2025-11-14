@@ -19,5 +19,5 @@ mod suggest;
 #[cfg(feature = "suggest")]
 pub use suggest::*;
 
-mod util;
+pub mod util;
 pub use util::*;

@@ -43,13 +43,13 @@ fn main() {
         ..Default::default()
     };
 
-    let remote_add = rapp::CmdSpec::<'_, Ctx>::new("add")
+    let remote_add = rapp::CmdSpec::new("add")
         .help("Add a remote")
         .pos(rapp::PosSpec::new("NAME", set_name).help("Remote name").required())
         .opt(
             rapp::OptSpec::value("url", set_url)
                 .long("url")
-                .default_os("https://example.com")
+                .default("https://example.com")
                 .metavar("URL")
                 .help("Remote URL"),
         )
@@ -71,7 +71,7 @@ fn main() {
                 c.base = Some(v.to_os_string());
                 Ok(())
             })
-            .default_os("some base value")
+            .default("some base value")
             .metavar("PATH")
             .long("base")
             .help("Base path"),

@@ -23,17 +23,16 @@ fn non_empty(v: &OsStr) -> rapp::Result<()> {
 fn main() -> rapp::Result<()> {
     let env = rapp::Env::default();
 
-    let root =
-        rapp::CmdSpec::<'_, Ctx>::new("svc").help("Service tool with ENV/DEFAULT overlays").opt(
-            rapp::OptSpec::value("socket", set_socket)
-                .long("socket")
-                .short('s')
-                .metavar("PATH")
-                .help("Control socket path")
-                .env("SVC_SOCKET")
-                .default_os("/run/svc.sock")
-                .validator(non_empty),
-        );
+    let root = rapp::CmdSpec::new("svc").help("Service tool with ENV/DEFAULT overlays").opt(
+        rapp::OptSpec::value("socket", set_socket)
+            .long("socket")
+            .short('s')
+            .metavar("PATH")
+            .help("Control socket path")
+            .env("SVC_SOCKET")
+            .default("/run/svc.sock")
+            .validator(non_empty),
+    );
 
     let argv: Vec<OsString> = std::env::args_os().skip(1).collect();
     let mut ctx = Ctx::default();

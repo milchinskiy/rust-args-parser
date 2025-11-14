@@ -32,7 +32,7 @@ pub fn looks_like_number_token(s: &str) -> bool {
         return false;
     }
     let mut i = 0;
-    if bytes[0] == b'-' {
+    if bytes[0] == b'-' || bytes[0] == b'+' {
         i += 1;
         if i >= bytes.len() {
             return false;
