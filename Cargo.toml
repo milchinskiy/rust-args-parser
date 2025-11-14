@@ -1,16 +1,16 @@
 [package]
+name = "rust-args-parser"
+version = "0.4.3"
+description = "Tiny, fast, callback-based CLI argument parser for Rust"
 rust-version = "1.60"
 edition = "2021"
-name = "rust-args-parser"
-description = "Tiny, fast, callback-based CLI argument parser for Rust"
-version = "0.4.3"
-license = "MIT OR Apache-2.0"
 homepage = "https://github.com/milchinskiy/rust-args-parser"
 repository = "https://github.com/milchinskiy/rust-args-parser"
 documentation = "https://docs.rs/rust-args-parser"
 readme = "README.md"
 keywords = ["cli", "command-line", "args", "parser"]
 categories = ["command-line-interface"]
+license = "MIT OR Apache-2.0"
 
 [lints.clippy]
 pedantic = "warn"
