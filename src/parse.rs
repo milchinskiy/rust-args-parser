@@ -175,7 +175,9 @@ fn try_parse_long<'a, Ctx: ?Sized>(
     }
     let body = &s[2..];
     let mut it = body.splitn(2, '=');
-    let name = it.next().unwrap();
+    let Some(name) = it.next() else {
+        return Ok(None);
+    };
     let val_inline = it.next();
 
     let Some(&idx) = long_ix.get(name) else {
@@ -214,9 +216,10 @@ fn try_parse_short_or_numeric<Ctx: ?Sized>(
     }
 
     // Numeric fallback: if first char is not a known short and token looks numeric, treat as positional/value.
-    let first = rest.chars().next().unwrap();
-    if short_ix.get(&first).is_none() && looks_like_number_token(s) {
-        return Ok(None);
+    if let Some(first) = rest.chars().next() {
+        if short_ix.get(&first).is_none() && looks_like_number_token(s) {
+            return Ok(None);
+        }
     }
 
     // Cluster walk
@@ -342,8 +345,7 @@ fn push_pos(m: &mut Matches, key: &str, val: OsString) {
     match m.values.get_mut(key) {
         Some(Many(vs)) => vs.push(val),
         Some(One(_) | Flag) => {
-            let old = m.values.remove(key).unwrap();
-            if let One(s) = old {
+            if let Some(One(s)) = m.values.remove(key) {
                 m.values.insert(key.to_string(), Many(vec![s, val]));
             }
         }
