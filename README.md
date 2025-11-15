@@ -6,6 +6,7 @@
 - 📚 Docs: <https://docs.rs/rust-args-parser>
 - 🔧 MSRV: **1.60**
 - ⚖️ License: **MIT OR Apache-2.0**
+- 📝 [Changelog](CHANGELOG.md)
 
 This crate is a pragmatic alternative to heavyweight frameworks when you want:
 
