@@ -81,7 +81,7 @@ let root = ap::CmdSpec::new("demo")
     .opt(ap::OptSpec::flag("verbose", |u: &mut App| { u.verbose = true; Ok(()) })
         .short('v').long("verbose"));
 
-let argv: Vec<_> = std::env::args_os().collect();
+let argv: Vec<_> = std::env::args_os().skip(1).collect();
 match ap::parse(&env, &root, &argv, &mut app) {
     Err(ap::Error::ExitMsg { code, message }) => { if let Some(m) = message { println!("{m}"); } std::process::exit(code) }
     Err(e) => { eprintln!("error: {e}"); std::process::exit(2) }

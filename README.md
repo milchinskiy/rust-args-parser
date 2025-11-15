@@ -55,7 +55,7 @@ fn main() -> ap::Result<()> {
         .pos(ap::PosSpec::new("INPUT", set_input).range(0, 1));
 
     let mut ctx = Ctx::default();
-    let argv: Vec<_> = std::env::args_os().collect();
+    let argv: Vec<_> = std::env::args_os().skip(1).collect();
 
     match ap::parse(&env, &spec, &argv, &mut ctx) {
         Err(ap::Error::ExitMsg { code, message }) => {
