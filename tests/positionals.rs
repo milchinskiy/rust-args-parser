@@ -1,58 +1,39 @@
+use rust_args_parser as ap;
 mod common;
 use common::*;
 
 #[test]
-fn missing_and_too_many_positionals() {
-    let env = env_base();
+fn range_min_is_enforced() {
+    let env = env_basic();
+    let root = ap::CmdSpec::new("d").pos(ap::PosSpec::new("FILE", push_file).range(2, 3));
 
-    let pos1 = [PosSpec::new("SRC").one(), PosSpec::new("DST").one()];
-    let cmd = CmdSpec::new(None, Some(run_cb)).pos(pos1);
-
-    let mut u1 = U::default();
-    let mut out1 = Vec::<u8>::new();
-    let e1 = dispatch_to(&env, &cmd, &["only"], &mut u1, &mut out1).unwrap_err();
-    match e1 {
-        Error::MissingPositional(n) => assert_eq!(n, "DST"),
-        _ => panic!("wrong error"),
+    let mut ctx = Ctx::default();
+    // Only 1 provided — expect an error
+    let err = ap::parse(&env, &root, &argv(&["a.txt"]), &mut ctx).unwrap_err();
+    match err {
+        ap::Error::User(msg) => assert!(msg.contains("below minimum")),
+        _ => panic!("{err:?}"),
     }
 
-    let pos2 = [PosSpec::new("FILE").range(1, 2), PosSpec::new("EXTRA").range(0, 1)];
-    let cmd2 = CmdSpec::new(None, Some(run_cb)).pos(pos2);
-
-    let mut u2 = U::default();
-    let mut out2 = Vec::<u8>::new();
-    let e2 = dispatch_to(&env, &cmd2, &["a", "b", "c", "d"], &mut u2, &mut out2).unwrap_err();
-    match e2 {
-        Error::TooManyPositional(n) => assert_eq!(n, "EXTRA"),
-        _ => panic!("wrong error"),
-    }
+    // 2..=3 should succeed
+    let mut ctx = Ctx::default();
+    ap::parse(&env, &root, &argv(&["a", "b"]), &mut ctx).unwrap();
+    let mut ctx = Ctx::default();
+    ap::parse(&env, &root, &argv(&["a", "b", "c"]), &mut ctx).unwrap();
 }
 
 #[test]
-fn run_receives_positionals_in_order() {
-    let env = env_base();
+fn read_root_and_leaf_scopes() {
+    let env = env_basic();
+    let root = ap::CmdSpec::new("t")
+        .opt(ap::OptSpec::flag("json", set_json).long("json"))
+        .subcmd(ap::CmdSpec::new("sub").pos(ap::PosSpec::new("X", push_file)));
 
-    let pos = [PosSpec::new("X").range(1, 3)];
-    let cmd = CmdSpec::new(None, Some(run_cb)).pos(pos);
+    let mut ctx = Ctx::default();
+    let m = ap::parse(&env, &root, &argv(&["--json", "sub", "f"]), &mut ctx).unwrap();
 
-    let mut u = U::default();
-    let mut out = Vec::<u8>::new();
-    let r = dispatch_to(&env, &cmd, &["1", "2", "3"], &mut u, &mut out);
-    assert!(r.is_ok());
-    assert_eq!(u.received, vec!["1", "2", "3"]);
-}
-
-#[test]
-fn unexpected_argument_when_no_schema() {
-    let env = env_base();
-
-    let cmd = CmdSpec::new(None, None).opts(&[]);
-
-    let mut u = U::default();
-    let mut out = Vec::<u8>::new();
-    let e = dispatch_to(&env, &cmd, &["dangling"], &mut u, &mut out).unwrap_err();
-    match e {
-        Error::UnexpectedArgument(s) => assert_eq!(s, "dangling"),
-        _ => panic!("wrong error"),
-    }
+    let rootv = m.at(&[]);
+    assert!(rootv.is_set_from("json", ap::Source::Cli));
+    let leafv = m.view();
+    assert!(leafv.pos_one("X").is_some());
 }

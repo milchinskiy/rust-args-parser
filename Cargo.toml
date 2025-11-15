@@ -1,16 +1,16 @@
 [package]
+name = "rust-args-parser"
+version = "1.0.0"
+description = "Tiny, fast, callback-based CLI argument parser for Rust"
 rust-version = "1.60"
 edition = "2021"
-name = "rust-args-parser"
-description = "Tiny, fast, callback-based CLI argument parser for Rust"
-version = "0.4.3"
-license = "MIT OR Apache-2.0"
 homepage = "https://github.com/milchinskiy/rust-args-parser"
 repository = "https://github.com/milchinskiy/rust-args-parser"
 documentation = "https://docs.rs/rust-args-parser"
 readme = "README.md"
 keywords = ["cli", "command-line", "args", "parser"]
 categories = ["command-line-interface"]
+license = "MIT OR Apache-2.0"
 
 [lints.clippy]
 pedantic = "warn"
@@ -22,19 +22,14 @@ style = "warn"
 cargo = "warn"
 redundant_pub_crate = "warn"
 
+[features]
+default = ["help", "suggest", "color"]
+help = []                              # help renderer (wrapping, sections, optional colors)
+suggest = []                           # did-you-mean distance util
+color = []                             # ANSI styles (opt-in); respects NO_COLOR/CLICOLOR loosely
+
 [dependencies]
 
 [dev-dependencies]
-criterion = "0.5"
-clap = { version = "4", features = ["std", "help"] }
-lexopt = "0.3"
-pico-args = "0.5"
-
-[[bench]]
-name = "parse_scenarios"
-harness = false
-
-[[bench]]
-name = "parse_addons"
-harness = false
-
+pretty_assertions = "1"
+proptest = "1"
