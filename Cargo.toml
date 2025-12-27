@@ -1,6 +1,6 @@
 [package]
 name = "rust-args-parser"
-version = "1.0.0"
+version = "1.0.1"
 description = "Tiny, fast, callback-based CLI argument parser for Rust"
 rust-version = "1.60"
 edition = "2021"

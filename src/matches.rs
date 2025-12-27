@@ -96,8 +96,6 @@ impl Matches {
         MatchView { m: self, path: path.to_vec() }
     }
 
-    // ——— Convenience root/leaf getters (use the leaf scope) ———
-
     /// Get a positional by name in the *leaf* scope as a slice (one becomes a 1‑elem slice).
     /// Returns None if not present.
     #[must_use]
@@ -156,6 +154,14 @@ impl Matches {
         let k = key_for_strings(&self.leaf_path, name);
         matches!(self.status.get(&k), Some(Status::Set(s)) if *s == src)
     }
+
+    /// Number of times a `flag` appeared in the leaf scope.
+    /// NOTE: only flags are counted; options with values return 0.
+    #[must_use]
+    pub fn flag_count(&self, name: &str) -> usize {
+        let k = key_for_strings(&self.leaf_path, name);
+        *self.flag_counts.get(&k).unwrap_or(&0)
+    }
 }
 
 /// Read‑only scoped accessor into `Matches`.
@@ -184,6 +190,14 @@ impl MatchView<'_> {
     pub fn is_set_from(&self, name: &str, src: Source) -> bool {
         let k = key_for(&self.path, name);
         matches!(self.m.status.get(&k), Some(Status::Set(s)) if *s == src)
+    }
+
+    /// Number of times a `flag` appeared in this scope.
+    /// NOTE: only flags are counted; options with values return 0.
+    #[must_use]
+    pub fn flag_count(&self, name: &str) -> usize {
+        let k = key_for(&self.path, name);
+        *self.m.flag_counts.get(&k).unwrap_or(&0)
     }
 
     /// Get a single **option** value (first of many if repeated).

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/) once **1.0.0** is released. Prior to 1.0.0, minor version bumps may include breaking changes.
 
 ---
+## [1.0.1]
+
+### Added
+
+- Exposed counting-flag occurrences via `Matches::flag_count()` and `MatchView::flag_count()`. This enables common patterns like `-vvv` / repeated `--verbose` to be read directly from parsed matches, returning `0` when the flag is absent.
 
 ## [1.0.0]
 

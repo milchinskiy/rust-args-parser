@@ -42,6 +42,12 @@ fn short_clusters_and_inline_values() {
     let leaf = m.view();
     assert!(leaf.is_set("verbose"));
     assert!(m.is_set_from("limit", ap::Source::Cli));
+
+    // explicit occurrence counts for counting flags like -vvv
+    assert_eq!(leaf.flag_count("verbose"), 3);
+    assert_eq!(m.flag_count("verbose"), 3);
+    // Absent flags should report 0.
+    assert_eq!(leaf.flag_count("json"), 0);
 }
 
 #[test]
