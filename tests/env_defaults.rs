@@ -32,3 +32,14 @@ fn cli_over_env_over_default() {
     assert_eq!(ctx.limit.as_deref(), Some("5"));
     assert!(m.is_set_from("limit", ap::Source::Cli));
 }
+
+#[test]
+fn env_defaults() {
+    let env = rust_args_parser::Env::default();
+    assert_eq!(env.wrap_cols, 0);
+    assert_eq!(env.color, rust_args_parser::ColorMode::Auto);
+    assert!(env.suggest);
+    assert!(env.auto_help);
+    assert_eq!(env.version, None);
+    assert_eq!(env.author, None);
+}

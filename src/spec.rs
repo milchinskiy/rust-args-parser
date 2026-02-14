@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 
 /// Color mode for help rendering.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorMode {
     Auto,
     Always,
@@ -24,7 +24,7 @@ pub struct Env {
 }
 impl Default for Env {
     fn default() -> Self {
-        Self { wrap_cols: 80, color: ColorMode::Auto, suggest: true, auto_help: true, version: None, author: None }
+        Self { wrap_cols: 0, color: ColorMode::Auto, suggest: true, auto_help: true, version: None, author: None }
     }
 }
 
