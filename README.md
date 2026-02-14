@@ -300,6 +300,7 @@ match ap::parse(&env, &spec, &argv, &mut ctx) {
 See `examples/`:
 
 - `basic.rs` — flags, values, callbacks, errors
+- `try_handlers.rs` — `*_try` callbacks with typed user errors
 - `subcommands.rs` — nested commands, leaf scoping
 - `env_defaults.rs` — ENV/default precedence
 - `git.rs` — realistic multi-command layout
