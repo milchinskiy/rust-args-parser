@@ -67,7 +67,7 @@ impl core::fmt::Display for Error {
                     write!(f, ". Did you mean {}?", format_alternates(suggestions))?;
                 }
                 Ok(())
-            },
+            }
             Self::UnknownCommand { token, suggestions } => {
                 write!(f, "unknown command: '{token}'")?;
                 if !suggestions.is_empty() {

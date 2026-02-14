@@ -124,11 +124,7 @@ fn print_usage<Ctx: ?Sized>(out_buf: &mut String, path: &[&str], cmd: &CmdSpec<'
 /// Render help with **strict column alignment** based on the *longest* label in the section.
 #[allow(clippy::too_many_lines)]
 #[must_use]
-pub fn render_help_with_path<Ctx: ?Sized>(
-    env: &Env,
-    path: &[&str],
-    cmd: &CmdSpec<'_, Ctx>,
-) -> String {
+pub fn render_help_with_path<Ctx: ?Sized>(env: &Env, path: &[&str], cmd: &CmdSpec<'_, Ctx>) -> String {
     let mut out = String::new();
     if let Some(h) = cmd.get_help() {
         let _ = writeln!(out, "{h}\n");
@@ -139,27 +135,15 @@ pub fn render_help_with_path<Ctx: ?Sized>(
     let is_root = path.len() <= 1;
 
     if env.auto_help {
-        rows.push((
-            vec!["-h".into(), "--help".into()],
-            None,
-            String::from("Show this help and exit"),
-        ));
+        rows.push((vec!["-h".into(), "--help".into()], None, String::from("Show this help and exit")));
     }
 
     if is_root {
         if env.version.is_some() {
-            rows.push((
-                vec!["-V".into(), "--version".into()],
-                None,
-                String::from("Show version and exit"),
-            ));
+            rows.push((vec!["-V".into(), "--version".into()], None, String::from("Show version and exit")));
         }
         if env.author.is_some() {
-            rows.push((
-                vec!["-A".into(), "--author".into()],
-                None,
-                String::from("Show author and exit"),
-            ));
+            rows.push((vec!["-A".into(), "--author".into()], None, String::from("Show author and exit")));
         }
     }
 
@@ -192,15 +176,11 @@ pub fn render_help_with_path<Ctx: ?Sized>(
 
     if !rows.is_empty() {
         let _ = writeln!(out, "{}", paint_section("Options"));
-        let max_raw = rows
-            .iter()
-            .map(|(opts, pos, _)| opts.join(", ").len() + pos.map_or(0, |s| s.len() + 1))
-            .max()
-            .unwrap_or(0);
+        let max_raw =
+            rows.iter().map(|(opts, pos, _)| opts.join(", ").len() + pos.map_or(0, |s| s.len() + 1)).max().unwrap_or(0);
         let desc_col = 2 + max_raw + 2; // "  " + label + "  "
         for (lab, pos, desc) in rows {
-            let mut painted =
-                lab.into_iter().map(|s| paint_option(&s)).collect::<Vec<String>>().join(", ");
+            let mut painted = lab.into_iter().map(|s| paint_option(&s)).collect::<Vec<String>>().join(", ");
             if let Some(pos) = pos {
                 painted.push_str(format!(" {}", paint_metavar(pos)).as_str());
             }

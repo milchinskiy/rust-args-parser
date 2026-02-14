@@ -256,11 +256,7 @@ fn build_spec<'a>() -> rapp::CmdSpec<'a, GitCtx> {
                 .help("set config on the command line")
                 .validator(config_is_name_val),
         )
-        .opt(
-            OptSpec::flag("no_pager", set_no_pager)
-                .long("no-pager")
-                .help("do not pipe output into a pager"),
-        )
+        .opt(OptSpec::flag("no_pager", set_no_pager).long("no-pager").help("do not pipe output into a pager"))
         // --- git init ---
         .subcmd(
             CmdSpec::<'a, GitCtx>::new("init")

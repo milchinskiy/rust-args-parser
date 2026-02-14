@@ -24,14 +24,7 @@ pub struct Env {
 }
 impl Default for Env {
     fn default() -> Self {
-        Self {
-            wrap_cols: 80,
-            color: ColorMode::Auto,
-            suggest: true,
-            auto_help: true,
-            version: None,
-            author: None,
-        }
+        Self { wrap_cols: 80, color: ColorMode::Auto, suggest: true, auto_help: true, version: None, author: None }
     }
 }
 

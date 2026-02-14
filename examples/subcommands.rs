@@ -31,11 +31,7 @@ fn handle_remote_add(m: &rapp::Matches, c: &mut Ctx) {
 }
 
 fn main() {
-    let env = rapp::Env {
-        version: Some("2.0.0"),
-        author: Some("Rust Args Parser"),
-        ..Default::default()
-    };
+    let env = rapp::Env { version: Some("2.0.0"), author: Some("Rust Args Parser"), ..Default::default() };
 
     let remote_add = rapp::CmdSpec::new("add")
         .help("Add a remote")
