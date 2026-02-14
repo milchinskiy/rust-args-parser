@@ -8,7 +8,7 @@ fn unknown_options_and_commands_suggest() {
     let mut env = env_basic();
     env.suggest = true;
     let root = ap::CmdSpec::new("demo")
-        .opt(ap::OptSpec::flag("helpme", |_| Ok(())).long("helpme"))
+        .opt(ap::OptSpec::flag("helpme", |_| {}).long("helpme"))
         .subcmd(ap::CmdSpec::new("remote"));
 
     // --helme ~> --helpme
@@ -38,10 +38,13 @@ fn unknown_options_and_commands_suggest() {
 #[test]
 fn unknown_has_no_suggestions_when_feature_off() {
     let env = env_basic();
-    let root = ap::CmdSpec::new("t").opt(ap::OptSpec::flag("helpme", |_| Ok(())).long("helpme"));
+    let root = ap::CmdSpec::new("t").opt(ap::OptSpec::flag("helpme", |_| {}).long("helpme"));
     let err = ap::parse(&env, &root, &argv(&["--helme"]), &mut Ctx::default()).unwrap_err();
-    match err { ap::Error::UnknownOption{ token, suggestions } => {
-        assert_eq!(token, "--helme");
-        assert!(suggestions.is_empty());
-    }, _ => panic!("{err:?}") }
+    match err {
+        ap::Error::UnknownOption { token, suggestions } => {
+            assert_eq!(token, "--helme");
+            assert!(suggestions.is_empty());
+        }
+        _ => panic!("{err:?}"),
+    }
 }

@@ -1,5 +1,3 @@
-#![allow(clippy::unnecessary_wraps)]
-
 use rust_args_parser as rapp;
 use std::ffi::{OsStr, OsString};
 
@@ -8,19 +6,19 @@ struct Ctx {
     socket: Option<std::path::PathBuf>,
 }
 
-fn set_socket(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
+fn set_socket(v: &OsStr, c: &mut Ctx) {
     c.socket = Some(std::path::PathBuf::from(v));
-    Ok(())
 }
-fn non_empty(v: &OsStr) -> rapp::Result<()> {
+
+fn non_empty(v: &OsStr) -> Result<(), &'static str> {
     if v.is_empty() {
-        Err(rapp::Error::User("empty value".into()))
+        Err("empty value")
     } else {
         Ok(())
     }
 }
 
-fn main() -> rapp::Result<()> {
+fn main() {
     let env = rapp::Env::default();
 
     let root = rapp::CmdSpec::new("svc").help("Service tool with ENV/DEFAULT overlays").opt(
@@ -51,5 +49,4 @@ fn main() -> rapp::Result<()> {
     }
 
     eprintln!("socket = {:?}", ctx.socket);
-    Ok(())
 }

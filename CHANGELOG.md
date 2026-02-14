@@ -2,14 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-This project adheres to [Semantic Versioning](https://semver.org/) once **1.0.0** is released. Prior to 1.0.0, minor version bumps may include breaking changes.
+This project adheres to [Semantic Versioning](https://semver.org/) once **1.0.0** is released.
+Prior to 1.0.0, minor version bumps may include breaking changes.
 
 ---
+
+## [2.0.0]
+
+### 🚨 Breaking changes
+
+- **User callbacks are infallible by default.** `CmdSpec::handler`, `OptSpec::flag`/`value`, and `PosSpec::new` now take callbacks returning `()`.
+- Added fallible variants for user-defined error types: `CmdSpec::handler_try`, `OptSpec::flag_try`/`value_try`, and `PosSpec::new_try`.
+- Validators accept any `Result<(), E>` where `E: Display` (mapped to `Error::User(String)`); `validator_try` is available for typed errors (mapped to `Error::UserAny`).
+- Specs accept closures for callbacks/validators (not only `fn` pointers).
+
+### Notes
+
+- Parse-level errors remain unchanged (`UnknownOption`, `MissingValue`, etc.).
+
 ## [1.0.1]
 
 ### Added
 
-- Exposed counting-flag occurrences via `Matches::flag_count()` and `MatchView::flag_count()`. This enables common patterns like `-vvv` / repeated `--verbose` to be read directly from parsed matches, returning `0` when the flag is absent.
+- Exposed counting-flag occurrences via `Matches::flag_count()` and `MatchView::flag_count()`.
+  This enables common patterns like `-vvv` / repeated `--verbose` to be read directly from parsed matches,
+  returning `0` when the flag is absent.
 
 ## [1.0.0]
 

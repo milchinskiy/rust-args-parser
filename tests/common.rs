@@ -1,9 +1,5 @@
-#![allow(
-    dead_code,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::unnecessary_wraps
-)]
+#![allow(dead_code, clippy::missing_errors_doc, clippy::missing_panics_doc)]
+
 use rust_args_parser as ap;
 use std::ffi::{OsStr, OsString};
 
@@ -35,27 +31,26 @@ pub struct Ctx {
 }
 
 /// Helpers
-pub fn inc_verbose(c: &mut Ctx) -> ap::Result<()> {
+pub fn inc_verbose(c: &mut Ctx) {
     c.verbose = c.verbose.saturating_add(1);
-    Ok(())
 }
-pub fn set_json(c: &mut Ctx) -> ap::Result<()> {
+
+pub fn set_json(c: &mut Ctx) {
     c.json = true;
-    Ok(())
 }
-pub fn set_jobs(v: &OsStr, c: &mut Ctx) -> ap::Result<()> {
+
+pub fn set_jobs(v: &OsStr, c: &mut Ctx) {
     c.jobs = Some(v.to_string_lossy().parse().unwrap());
-    Ok(())
 }
-pub fn set_limit(v: &OsStr, c: &mut Ctx) -> ap::Result<()> {
+
+pub fn set_limit(v: &OsStr, c: &mut Ctx) {
     c.limit = Some(v.to_string_lossy().into());
-    Ok(())
 }
-pub fn set_input(v: &OsStr, c: &mut Ctx) -> ap::Result<()> {
+
+pub fn set_input(v: &OsStr, c: &mut Ctx) {
     c.input = Some(v.to_os_string());
-    Ok(())
 }
-pub fn push_file(v: &OsStr, c: &mut Ctx) -> ap::Result<()> {
+
+pub fn push_file(v: &OsStr, c: &mut Ctx) {
     c.files.push(v.to_os_string());
-    Ok(())
 }

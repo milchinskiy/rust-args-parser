@@ -3,9 +3,9 @@ mod common;
 use common::*;
 use std::ffi::OsStr;
 
-fn non_empty(v: &OsStr) -> ap::Result<()> {
+fn non_empty(v: &OsStr) -> Result<(), &'static str> {
     if v.is_empty() {
-        Err(ap::Error::User("empty".into()))
+        Err("empty")
     } else {
         Ok(())
     }
@@ -42,9 +42,9 @@ fn option_and_positional_validators() {
 #[test]
 fn validator_runs_on_env_before_callbacks() {
     let envv = env_basic();
-    let root = ap::CmdSpec::new("t").opt(
-        ap::OptSpec::value("name", set_limit).long("name").env("APP_NAME").validator(non_empty),
-    );
+    let root = ap::CmdSpec::new("t")
+        .opt(ap::OptSpec::value("name", set_limit).long("name").env("APP_NAME").validator(non_empty));
+
     std::env::set_var("APP_NAME", ""); // invalid via validator
     let mut ctx = Ctx::default();
     let err = ap::parse(&envv, &root, &[], &mut ctx).unwrap_err();

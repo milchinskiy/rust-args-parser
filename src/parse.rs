@@ -36,21 +36,14 @@ pub fn parse<'a, Ctx: ?Sized>(
                 cursor.eager_overlay_here(&mut m);
                 continue;
             }
-            if let Some(consumed) =
-                try_parse_long(env, cursor.current, &mut m, &cursor.path, &cursor.long_ix, argv, i)?
+            if let Some(consumed) = try_parse_long(env, cursor.current, &mut m, &cursor.path, &cursor.long_ix, argv, i)?
             {
                 i += consumed;
                 continue;
             }
-            if let Some(consumed) = try_parse_short_or_numeric(
-                env,
-                cursor.current,
-                &mut m,
-                &cursor.path,
-                &cursor.short_ix,
-                argv,
-                i,
-            )? {
+            if let Some(consumed) =
+                try_parse_short_or_numeric(env, cursor.current, &mut m, &cursor.path, &cursor.short_ix, argv, i)?
+            {
                 i += consumed;
                 continue;
             }
@@ -64,14 +57,9 @@ pub fn parse<'a, Ctx: ?Sized>(
             }
         }
         // Positional
-        if let Some(consumed) = try_push_positional(
-            cursor.current,
-            &mut m,
-            &cursor.path,
-            &mut cursor.pos_idx,
-            &mut cursor.pos_counts,
-            tok,
-        ) {
+        if let Some(consumed) =
+            try_push_positional(cursor.current, &mut m, &cursor.path, &mut cursor.pos_idx, &mut cursor.pos_counts, tok)
+        {
             i += consumed;
             continue;
         }
@@ -361,18 +349,10 @@ fn os_dbg(s: &OsStr) -> String {
 }
 
 #[cfg(feature = "suggest")]
-fn unknown_long_error<Ctx: ?Sized>(
-    env: &Env,
-    name: &str,
-    cmd: &CmdSpec<'_, Ctx>,
-    path: &[&str],
-) -> Error {
+fn unknown_long_error<Ctx: ?Sized>(env: &Env, name: &str, cmd: &CmdSpec<'_, Ctx>, path: &[&str]) -> Error {
     let suggestions = if env.suggest {
-        let mut cands: Vec<String> = cmd
-            .get_opts()
-            .iter()
-            .filter_map(|o| o.get_long().map(std::string::ToString::to_string))
-            .collect();
+        let mut cands: Vec<String> =
+            cmd.get_opts().iter().filter_map(|o| o.get_long().map(std::string::ToString::to_string)).collect();
         if path.is_empty() {
             if env.author.is_some() {
                 cands.push("author".to_string());
@@ -395,12 +375,7 @@ fn unknown_long_error<Ctx: ?Sized>(_: &Env, name: &str, _: &CmdSpec<'_, Ctx>, _:
 }
 
 #[cfg(feature = "suggest")]
-fn unknown_short_error<Ctx: ?Sized>(
-    env: &Env,
-    c: char,
-    cmd: &CmdSpec<'_, Ctx>,
-    path: &[&str],
-) -> Error {
+fn unknown_short_error<Ctx: ?Sized>(env: &Env, c: char, cmd: &CmdSpec<'_, Ctx>, path: &[&str]) -> Error {
     let suggestions = if env.suggest {
         let mut cands: Vec<String> =
             cmd.get_opts().iter().filter_map(|o| o.get_short().map(|s| s.to_string())).collect();
@@ -427,8 +402,7 @@ fn unknown_short_error<Ctx: ?Sized>(_: &Env, c: char, _: &CmdSpec<'_, Ctx>, _: &
 
 #[cfg(feature = "suggest")]
 fn best_suggestions(needle: &str, hay: &[String]) -> Vec<String> {
-    let mut scored: Vec<(usize, String)> =
-        hay.iter().map(|h| (levenshtein(needle, h), h.clone())).collect();
+    let mut scored: Vec<(usize, String)> = hay.iter().map(|h| (levenshtein(needle, h), h.clone())).collect();
     scored.sort_by_key(|(d, _)| *d);
     scored.into_iter().filter(|(d, _)| *d <= 2).take(3).map(|(_, s)| s).collect()
 }
@@ -454,20 +428,14 @@ fn overlay_env_and_defaults<Ctx: ?Sized>(m: &mut Matches, path: &[&str], cmd: &C
     eager_overlay(m, path, cmd, crate::Source::Default);
 }
 
-fn validate_level<'a, Ctx: ?Sized>(
-    m: &Matches,
-    path: &[&'a str],
-    cmd: &CmdSpec<'a, Ctx>,
-) -> Result<()> {
+fn validate_level<'a, Ctx: ?Sized>(m: &Matches, path: &[&'a str], cmd: &CmdSpec<'a, Ctx>) -> Result<()> {
     use crate::spec::PosCardinality;
     use crate::Value;
 
     // Positionals: required + Range{min} check
     for p in cmd.get_positionals() {
         let k = pos_key_for(path, p.get_name());
-        if p.get_cardinality() == (PosCardinality::One { required: true })
-            && !m.values.contains_key(&k)
-        {
+        if p.get_cardinality() == (PosCardinality::One { required: true }) && !m.values.contains_key(&k) {
             return Err(Error::User("missing required positional".into()));
         }
         if let PosCardinality::Range { min, .. } = p.get_cardinality() {
@@ -486,23 +454,16 @@ fn validate_level<'a, Ctx: ?Sized>(
     for g in cmd.get_groups() {
         let mut hits = 0u32;
         for o in cmd.get_opts() {
-            if o.get_group() == Some(g.name) && m.status.contains_key(&key_for(path, o.get_name()))
-            {
+            if o.get_group() == Some(g.name) && m.status.contains_key(&key_for(path, o.get_name())) {
                 hits += 1;
             }
         }
         match g.mode {
             GroupMode::Xor if hits > 1 => {
-                return Err(Error::User(format!(
-                    "options in group '{}' are mutually exclusive",
-                    g.name
-                )))
+                return Err(Error::User(format!("options in group '{}' are mutually exclusive", g.name)))
             }
             GroupMode::ReqOne if hits == 0 => {
-                return Err(Error::User(format!(
-                    "one of the options in group '{}' is required",
-                    g.name
-                )))
+                return Err(Error::User(format!("one of the options in group '{}' is required", g.name)))
             }
             _ => {}
         }
@@ -546,12 +507,7 @@ fn validate_level<'a, Ctx: ?Sized>(
     Ok(())
 }
 
-fn run_callbacks<'a, Ctx: ?Sized>(
-    m: &Matches,
-    path: &[&'a str],
-    cmd: &CmdSpec<'a, Ctx>,
-    ctx: &mut Ctx,
-) -> Result<()> {
+fn run_callbacks<'a, Ctx: ?Sized>(m: &Matches, path: &[&'a str], cmd: &CmdSpec<'a, Ctx>, ctx: &mut Ctx) -> Result<()> {
     use crate::Value;
 
     // options

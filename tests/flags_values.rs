@@ -8,19 +8,8 @@ fn root_spec<'a>() -> ap::CmdSpec<'a, Ctx> {
         .help("Demo root")
         .opt(ap::OptSpec::flag("verbose", inc_verbose).short('v').long("verbose").help("verbose"))
         .opt(ap::OptSpec::flag("json", set_json).long("json").help("json output"))
-        .opt(
-            ap::OptSpec::value("jobs", set_jobs)
-                .short('j')
-                .long("jobs")
-                .metavar("N")
-                .help("worker threads"),
-        )
-        .opt(
-            ap::OptSpec::value("limit", set_limit)
-                .long("limit")
-                .metavar("N")
-                .help("optional limit"),
-        )
+        .opt(ap::OptSpec::value("jobs", set_jobs).short('j').long("jobs").metavar("N").help("worker threads"))
+        .opt(ap::OptSpec::value("limit", set_limit).long("limit").metavar("N").help("optional limit"))
         .pos(ap::PosSpec::new("INPUT", set_input).range(0, 1))
         .pos(ap::PosSpec::new("FILE", push_file).many())
 }
@@ -56,7 +45,6 @@ fn numeric_lookahead_treats_negative_as_value() {
     let env = env_basic();
     let root = ap::CmdSpec::new("demo").pos(ap::PosSpec::new("VAL", |v, c: &mut Ctx| {
         c.limit = Some(v.to_string_lossy().into());
-        Ok(())
     }));
     let mut ctx = Ctx::default();
     let argv = argv(&["-0.25"]);
@@ -74,10 +62,7 @@ fn end_of_options_marker() {
     let argv = argv(&["--", "-vv", "file.txt"]);
     ap::parse(&env, &root, &argv, &mut ctx).expect("parse");
     // "-vv" must be treated as a file
-    assert_eq!(
-        ctx.files,
-        vec![std::ffi::OsString::from("-vv"), std::ffi::OsString::from("file.txt")]
-    );
+    assert_eq!(ctx.files, vec![std::ffi::OsString::from("-vv"), std::ffi::OsString::from("file.txt")]);
 }
 
 #[test]
@@ -96,8 +81,7 @@ fn missing_required_value_errors() {
 #[test]
 fn short_inline_negative_value() {
     let env = env_basic();
-    let root =
-        ap::CmdSpec::new("t").opt(ap::OptSpec::value("delta", set_limit).short('d').long("delta"));
+    let root = ap::CmdSpec::new("t").opt(ap::OptSpec::value("delta", set_limit).short('d').long("delta"));
     let mut ctx = Ctx::default();
     ap::parse(&env, &root, &argv(&["-d-3"]), &mut ctx).unwrap();
     assert_eq!(ctx.limit.as_deref(), Some("-3"));
