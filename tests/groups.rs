@@ -10,7 +10,6 @@ fn xor_group_enforced() {
         .opt(
             ap::OptSpec::flag("yaml", |c: &mut Ctx| {
                 c.limit = Some("yaml".into());
-                Ok(())
             })
             .long("yaml")
             .group("fmt"),
@@ -31,7 +30,7 @@ fn xor_group_enforced() {
 fn reqone_group_enforced() {
     let env = env_basic();
     let root = ap::CmdSpec::new("demo")
-        .opt(ap::OptSpec::flag("quiet", |_| Ok(())).long("quiet").group("out"))
+        .opt(ap::OptSpec::flag("quiet", |_| {}).long("quiet").group("out"))
         .opt(ap::OptSpec::flag("verbose", inc_verbose).long("verbose").group("out"))
         .group("out", ap::GroupMode::ReqOne);
 
@@ -48,7 +47,7 @@ fn xor_group_env_vs_cli_conflict() {
     let envv = env_basic();
     let root = ap::CmdSpec::new("t")
         .opt(ap::OptSpec::flag("json", set_json).long("json").env("FMT_JSON").group("fmt"))
-        .opt(ap::OptSpec::flag("yaml", |_| Ok(())).long("yaml").group("fmt"))
+        .opt(ap::OptSpec::flag("yaml", |_| {}).long("yaml").group("fmt"))
         .group("fmt", ap::GroupMode::Xor);
 
     std::env::set_var("FMT_JSON", "1");

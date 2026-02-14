@@ -56,7 +56,6 @@ fn numeric_lookahead_treats_negative_as_value() {
     let env = env_basic();
     let root = ap::CmdSpec::new("demo").pos(ap::PosSpec::new("VAL", |v, c: &mut Ctx| {
         c.limit = Some(v.to_string_lossy().into());
-        Ok(())
     }));
     let mut ctx = Ctx::default();
     let argv = argv(&["-0.25"]);

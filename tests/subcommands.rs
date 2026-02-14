@@ -1,16 +1,13 @@
-#![allow(clippy::unnecessary_wraps)]
 use rust_args_parser as ap;
 mod common;
 use common::*;
 use std::ffi::OsStr;
 
-fn set_name(v: &OsStr, c: &mut Ctx) -> ap::Result<()> {
+fn set_name(v: &OsStr, c: &mut Ctx) {
     c.input = Some(v.to_os_string());
-    Ok(())
 }
-fn set_url(v: &OsStr, c: &mut Ctx) -> ap::Result<()> {
+fn set_url(v: &OsStr, c: &mut Ctx) {
     c.limit = Some(v.to_string_lossy().into());
-    Ok(())
 }
 
 #[test]

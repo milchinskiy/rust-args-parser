@@ -34,24 +34,30 @@ struct Ctx {
     input: Option<String>,
 }
 
-fn inc_verbose(c: &mut Ctx) -> ap::Result<()> { c.verbose = c.verbose.saturating_add(1); Ok(()) }
-fn set_json(c: &mut Ctx) -> ap::Result<()> { c.json = true; Ok(()) }
-fn set_jobs(v: &OsStr, c: &mut Ctx) -> ap::Result<()> {
-    let n: u32 = v.to_string_lossy().parse().map_err(|_| ap::Error::User("invalid --jobs".into()))?;
-    c.jobs = Some(n); Ok(())
+fn inc_verbose(c: &mut Ctx) { c.verbose = c.verbose.saturating_add(1); }
+fn set_json(c: &mut Ctx) { c.json = true; }
+
+fn jobs_is_u32(v: &OsStr) -> Result<(), &'static str> {
+    v.to_string_lossy().parse::<u32>().map(|_| ()).map_err(|_| "invalid --jobs")
 }
-fn set_input(v: &OsStr, c: &mut Ctx) -> ap::Result<()> { c.input = Some(v.to_string_lossy().into()); Ok(()) }
+
+fn set_jobs(v: &OsStr, c: &mut Ctx) {
+    // Safe because `jobs_is_u32` validates first.
+    c.jobs = Some(v.to_string_lossy().parse::<u32>().unwrap());
+}
+
+fn set_input(v: &OsStr, c: &mut Ctx) { c.input = Some(v.to_string_lossy().into()); }
 
 fn main() -> ap::Result<()> {
     // Global environment for parsing (and help rendering, if enabled)
-    let env = ap::Env { wrap_cols: 80, color: ap::ColorMode::Auto, suggest: true, auto_help: true, version: Some("0.1.0"), author: None };
+    let env = ap::Env { wrap_cols: 80, color: ap::ColorMode::Auto, suggest: true, auto_help: true, version: Some("2.0.0"), author: None };
 
     // Command spec
     let spec = ap::CmdSpec::new("demo")
         .help("Demo tool")
         .opt(ap::OptSpec::flag("verbose", inc_verbose).short('v').long("verbose").help("Enable verbose output"))
         .opt(ap::OptSpec::flag("json", set_json).long("json").help("JSON output"))
-        .opt(ap::OptSpec::value("jobs", set_jobs).short('j').long("jobs").metavar("N").help("Worker threads"))
+        .opt(ap::OptSpec::value("jobs", set_jobs).short('j').long("jobs").metavar("N").help("Worker threads").validator(jobs_is_u32))
         .pos(ap::PosSpec::new("INPUT", set_input).range(0, 1));
 
     let mut ctx = Ctx::default();
@@ -88,9 +94,9 @@ Subcommands are nested `CmdSpec`s and **scoped**.
 ```rust
 use rust_args_parser as ap; use std::ffi::OsStr;
 #[derive(Default)] struct Ctx { remote: Option<String>, branch: Option<String>, files: Vec<String> }
-fn set_remote(v: &OsStr, c: &mut Ctx) -> ap::Result<()> { c.remote = Some(v.to_string_lossy().into()); Ok(()) }
-fn set_branch(v: &OsStr, c: &mut Ctx) -> ap::Result<()> { c.branch = Some(v.to_string_lossy().into()); Ok(()) }
-fn push_file(v: &OsStr, c: &mut Ctx) -> ap::Result<()> { c.files.push(v.to_string_lossy().into()); Ok(()) }
+fn set_remote(v: &OsStr, c: &mut Ctx) { c.remote = Some(v.to_string_lossy().into()); }
+fn set_branch(v: &OsStr, c: &mut Ctx) { c.branch = Some(v.to_string_lossy().into()); }
+fn push_file(v: &OsStr, c: &mut Ctx) { c.files.push(v.to_string_lossy().into()); }
 
 let spec = ap::CmdSpec::new("tool")
     .subcmd(
@@ -121,7 +127,7 @@ assert_eq!(v.pos_one("BRANCH").unwrap(), OsStr::new("main"));
 
 - **Flag**: `OptSpec::flag("name", on_flag)`
 - **Value**: `OptSpec::value("name", on_value)`
-- Builders: `.short('j')`, `.long("jobs")`, `.metavar("N")`, `.help("…")`, `.env("VAR")`, `.default(OsString)`, `.group("name")`, `.repeat(Repeat::Many)`, `.validator(fn)`
+- Builders: `.short('j')`, `.long("jobs")`, `.metavar("N")`, `.help("…")`, `.env("VAR")`, `.default(OsString)`, `.group("name")`, `.repeatable()`, `.validator(fn)`
 
 ### Positionals
 

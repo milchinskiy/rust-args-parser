@@ -37,7 +37,7 @@ fn golden_spec(env_name: &str) -> ap::CmdSpec<'_, Ctx> {
                     .help("Push to remote")
                     .pos(ap::PosSpec::new("REMOTE", set_input).required())
                     // BRANCH is validated only via view below; we don't mutate Ctx for it
-                    .pos(ap::PosSpec::new("BRANCH", |_, _: &mut Ctx| Ok(())).required())
+                    .pos(ap::PosSpec::new("BRANCH", |_, _: &mut Ctx| {}).required())
                     .pos(ap::PosSpec::new("FILE", push_file).many()),
             ),
         )

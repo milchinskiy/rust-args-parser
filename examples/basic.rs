@@ -1,5 +1,3 @@
-#![allow(clippy::unnecessary_wraps)]
-
 use rust_args_parser as rapp;
 use std::ffi::{OsStr, OsString};
 
@@ -13,50 +11,48 @@ struct Ctx {
     json: bool,
 }
 
-fn set_verbose(c: &mut Ctx) -> rapp::Result<()> {
+fn inc_verbose(c: &mut Ctx) {
     c.verbose = c.verbose.saturating_add(1);
-    Ok(())
 }
-fn set_quiet(c: &mut Ctx) -> rapp::Result<()> {
+fn set_quiet(c: &mut Ctx) {
     c.quiet = true;
-    Ok(())
 }
-fn set_json(c: &mut Ctx) -> rapp::Result<()> {
+fn set_json(c: &mut Ctx) {
     c.json = true;
-    Ok(())
 }
 
-fn set_jobs(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
-    let s = v.to_string_lossy();
-    let n: u32 = s.parse().map_err(|_| rapp::Error::User("invalid number for --jobs".into()))?;
-    c.jobs = Some(n);
-    Ok(())
+fn set_jobs(v: &OsStr, c: &mut Ctx) {
+    // Safe because `jobs_is_u32` validates first.
+    c.jobs = Some(v.to_string_lossy().parse::<u32>().unwrap());
 }
-fn set_input(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
+fn set_input(v: &OsStr, c: &mut Ctx) {
     c.input = Some(v.to_os_string());
-    Ok(())
 }
-fn push_file(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
+fn push_file(v: &OsStr, c: &mut Ctx) {
     c.files.push(v.to_os_string());
-    Ok(())
 }
 
-fn non_empty(v: &OsStr) -> rapp::Result<()> {
+fn non_empty(v: &OsStr) -> Result<(), &'static str> {
     if v.is_empty() {
-        Err(rapp::Error::User("value must be non-empty".into()))
+        Err("value must be non-empty")
     } else {
         Ok(())
     }
 }
 
+fn jobs_is_u32(v: &OsStr) -> Result<(), &'static str> {
+    non_empty(v)?;
+    v.to_string_lossy().parse::<u32>().map(|_| ()).map_err(|_| "invalid number for --jobs")
+}
+
 fn main() {
-    let mut env = rapp::Env { version: Some("0.1.0"), ..Default::default() };
+    let mut env = rapp::Env { version: Some("2.0.0"), ..Default::default() };
     env.wrap_cols = 120;
 
     let root = rapp::CmdSpec::new("demo")
         .help("Demo app showing flags, options, positionals, groups")
         .opt(
-            rapp::OptSpec::flag("verbose", set_verbose)
+            rapp::OptSpec::flag("verbose", inc_verbose)
                 .short('v')
                 .long("verbose")
                 .help("Increase verbosity")
@@ -68,15 +64,10 @@ fn main() {
                 .long("jobs")
                 .metavar("N")
                 .help("Number of jobs")
-                .validator(non_empty),
+                .validator(jobs_is_u32),
         )
         // Mutually exclusive output mode
-        .opt(
-            rapp::OptSpec::flag("quiet", set_quiet)
-                .long("quiet")
-                .help("Suppress output")
-                .group("out"),
-        )
+        .opt(rapp::OptSpec::flag("quiet", set_quiet).long("quiet").help("Suppress output").group("out"))
         .opt(rapp::OptSpec::flag("json", set_json).long("json").help("JSON output").group("out"))
         .group("out", rapp::GroupMode::Xor)
         // Positionals: INPUT (required), then FILE... (zero or more)

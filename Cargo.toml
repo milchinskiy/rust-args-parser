@@ -1,6 +1,6 @@
 [package]
 name = "rust-args-parser"
-version = "1.0.1"
+version = "2.0.0"
 description = "Tiny, fast, callback-based CLI argument parser for Rust"
 rust-version = "1.60"
 edition = "2021"
@@ -16,11 +16,12 @@ license = "MIT OR Apache-2.0"
 pedantic = "warn"
 correctness = "warn"
 complexity = "warn"
-performance = "warn"
+perf = "warn"
 nursery = "warn"
 style = "warn"
 cargo = "warn"
 redundant_pub_crate = "warn"
+missing_const_for_fn = { level = "allow", priority = 1 }
 
 [features]
 default = ["help", "suggest", "color"]

@@ -1,5 +1,3 @@
-#![allow(clippy::unnecessary_wraps)]
-
 use rust_args_parser as rapp;
 use std::ffi::{OsStr, OsString};
 
@@ -11,20 +9,17 @@ struct Ctx {
     url: Option<OsString>,
 }
 
-fn set_verbose(c: &mut Ctx) -> rapp::Result<()> {
+fn inc_verbose(c: &mut Ctx) {
     c.verbose = c.verbose.saturating_add(1);
-    Ok(())
 }
-fn set_name(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
+fn set_name(v: &OsStr, c: &mut Ctx) {
     c.remote_name = Some(v.to_os_string());
-    Ok(())
 }
-fn set_url(v: &OsStr, c: &mut Ctx) -> rapp::Result<()> {
+fn set_url(v: &OsStr, c: &mut Ctx) {
     c.url = Some(v.to_os_string());
-    Ok(())
 }
 
-fn handle_remote_add(m: &rapp::Matches, c: &mut Ctx) -> rapp::Result<()> {
+fn handle_remote_add(m: &rapp::Matches, c: &mut Ctx) {
     eprintln!(
         "[handler] remote add: base={:?} name={:?} url={:?}",
         c.base.as_deref(),
@@ -33,12 +28,11 @@ fn handle_remote_add(m: &rapp::Matches, c: &mut Ctx) -> rapp::Result<()> {
     );
     // You can also read from Matches if you prefer keys:
     let _name = m.get_value("NAME");
-    Ok(())
 }
 
 fn main() {
     let env = rapp::Env {
-        version: Some("0.1.0"),
+        version: Some("2.0.0"),
         author: Some("Rust Args Parser"),
         ..Default::default()
     };
@@ -60,7 +54,7 @@ fn main() {
         .alias("rmt")
         .alias("add-remote")
         .opt(
-            rapp::OptSpec::flag("verbose", set_verbose)
+            rapp::OptSpec::flag("verbose", inc_verbose)
                 .short('v')
                 .long("verbose")
                 .help("Increase verbosity")
@@ -69,7 +63,6 @@ fn main() {
         .opt(
             rapp::OptSpec::value("base", |v, c: &mut Ctx| {
                 c.base = Some(v.to_os_string());
-                Ok(())
             })
             .default("some base value")
             .metavar("PATH")
@@ -78,8 +71,7 @@ fn main() {
         )
         .subcmd(remote_add);
 
-    let root =
-        rapp::CmdSpec::<'_, Ctx>::new("sc").help("Tool with nested subcommands").subcmd(remote);
+    let root = rapp::CmdSpec::<'_, Ctx>::new("sc").help("Tool with nested subcommands").subcmd(remote);
 
     let argv: Vec<OsString> = std::env::args_os().skip(1).collect();
     let mut ctx = Ctx::default();
