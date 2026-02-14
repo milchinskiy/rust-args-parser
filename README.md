@@ -85,6 +85,74 @@ fn main() -> ap::Result<()> {
 - **Negative numbers**: `-d-3`, `--delta -3` are values (not options).
 - **End-of-options**: `--` makes the rest positional, even if they start with `-`.
 
+## Migration to 2.0.0
+
+Version **2.0.0** separates **parse-level** errors (unknown options, missing values, etc.) from **user callback** failures.
+
+### What changed
+
+- **Infallible by default**: `CmdSpec::handler`, `CmdSpec::validator`, `OptSpec::{flag,value}`, `PosSpec::new` callbacks now return `()`.
+- **Fallible variants**: use `*_try` (`handler_try`, `validator_try`, `flag_try`, `value_try`, `new_try`) when your callback needs to fail with a user-defined error:
+  - `Result<(), E>` where `E: std::error::Error + Send + Sync + 'static`
+- **Validators**:
+  - `validator(...)` accepts `Result<(), E>` where `E: std::fmt::Display` and maps failures to `Error::User(String)`.
+  - `validator_try(...)` accepts `Result<(), E>` where `E: std::error::Error + Send + Sync + 'static` and maps failures to `Error::UserAny(...)`.
+- `parse(...)` still returns `Result<Matches, rust_args_parser::Error>`. Parse errors are unchanged; user failures surface as `Error::User(...)` / `Error::UserAny(...)`.
+
+### Before / after
+
+**1.x (callbacks returned `ap::Result<()>`)**
+
+```rust
+use rust_args_parser as ap;
+use std::ffi::OsStr;
+
+fn set_jobs(v: &OsStr, ctx: &mut Ctx) -> ap::Result<()> {
+    ctx.jobs = Some(v.to_string_lossy().parse::<u32>().map_err(|_| ap::Error::User("invalid --jobs".into()))?);
+    Ok(())
+}
+```
+
+**2.0.0 (infallible by default)**
+
+```rust
+use rust_args_parser as ap;
+use std::ffi::OsStr;
+
+fn jobs_is_u32(v: &OsStr) -> Result<(), &'static str> {
+    v.to_string_lossy().parse::<u32>().map(|_| ()).map_err(|_| "invalid --jobs")
+}
+
+fn set_jobs(v: &OsStr, ctx: &mut Ctx) {
+    // Safe because `jobs_is_u32` validates first.
+    ctx.jobs = Some(v.to_string_lossy().parse::<u32>().unwrap());
+}
+
+let spec = ap::CmdSpec::new("tool")
+    .opt(ap::OptSpec::value("jobs", set_jobs).long("jobs").validator(jobs_is_u32));
+```
+
+**2.0.0 (fallible user callback, typed error)**
+
+```rust
+use rust_args_parser as ap;
+use std::{error::Error, ffi::OsStr, fmt};
+
+#[derive(Debug)]
+struct AppError(&'static str);
+impl fmt::Display for AppError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.0) } }
+impl Error for AppError {}
+
+fn set_jobs_try(v: &OsStr, ctx: &mut Ctx) -> Result<(), AppError> {
+    let n = v.to_string_lossy().parse::<u32>().map_err(|_| AppError("invalid --jobs"))?;
+    ctx.jobs = Some(n);
+    Ok(())
+}
+
+let spec = ap::CmdSpec::new("tool")
+    .opt(ap::OptSpec::value_try("jobs", set_jobs_try).long("jobs"));
+```
+
 ---
 
 ## Subcommands
