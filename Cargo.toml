@@ -1,6 +1,6 @@
 [package]
 name = "rust-args-parser"
-version = "2.0.1"
+version = "2.1.0"
 description = "Tiny, fast, callback-based CLI argument parser for Rust"
 rust-version = "1.60"
 edition = "2021"
@@ -23,14 +23,28 @@ cargo = "warn"
 redundant_pub_crate = "warn"
 missing_const_for_fn = { level = "allow", priority = 1 }
 
+[workspace]
+members = ["derive"]
+resolver = "2"
+
 [features]
 default = ["help", "suggest", "color"]
 help = []                              # help renderer (wrapping, sections, optional colors)
 suggest = []                           # did-you-mean distance util
-color = []                             # ANSI styles (opt-in); respects NO_COLOR/CLICOLOR loosely
+color = []
+derive = ["dep:rust-args-parser-derive"] # Derive macros and typed event bindings
 
 [dependencies]
+rust-args-parser-derive = { path = "derive", version = "0.1.0", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1"
 proptest = "1"
+
+[[example]]
+name = "derive_basic"
+required-features = ["derive"]
+
+[[example]]
+name = "derive_subcommands"
+required-features = ["derive"]

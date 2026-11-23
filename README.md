@@ -1,330 +1,131 @@
-# rust_args_parser
+# rust-args-parser
 
-> Tiny, fast, callback-based CLI argument parser for Rust.
+A small, callback-driven CLI parser for Rust. Define commands with `CmdSpec`, attach callbacks to arguments, and execute a handler for the selected leaf command. The optional `derive` feature lets you declare the same parser using Rust structs and enums.
 
-- 📦 Crate: `rust-args-parser`
-- 📚 Docs: <https://docs.rs/rust-args-parser>
-- 🔧 MSRV: **1.60**
-- ⚖️ License: **MIT OR Apache-2.0**
-- 📝 [Changelog](CHANGELOG.md)
+[Crate documentation](https://docs.rs/rust-args-parser) · [Changelog](CHANGELOG.md) · MIT / Apache-2.0
 
-This crate is a pragmatic alternative to heavyweight frameworks when you want:
+## Start here
 
-- **Callbacks**: options/positionals map directly to functions that mutate your context.
-- **Subcommands** (nested `CmdSpec`) with aliases.
-- **Short clusters** (`-vvj8`) and long forms (`--jobs=8`).
-- **Numeric look-ahead** so tokens like `-1`, `-.5`, `+3.14`, `1e3` are treated as values, not options.
-- **Groups**: mutually exclusive (`Xor`) / at least one required (`ReqOne`).
-- **ENV/Default overlays** with clear precedence (**CLI > ENV > Default**).
-- **Readable matches** with **scope** and **provenance**.
+The existing builder API is unchanged. It works without macros or additional runtime dependencies.
 
----
+- [`examples/basic.rs`](examples/basic.rs) — flags, values, validators, required positionals, groups
+- [`examples/subcommands.rs`](examples/subcommands.rs) — aliases, nested commands, leaf handlers
+- [`examples/try_handlers.rs`](examples/try_handlers.rs) — fallible callbacks and typed errors
+- [`examples/env_defaults.rs`](examples/env_defaults.rs) — CLI / environment / default precedence
+- [`examples/git.rs`](examples/git.rs) — larger command tree
 
-## Quick start
+```sh
+cargo run --example basic -- -vv -j4 input.txt
+cargo run --example subcommands -- remote add origin
+```
+
+### Execution model
+
+`parse(&env, &spec, &argv, &mut context)` accepts arguments **without** the executable name. On success it returns `Matches` and invokes callbacks as follows:
+
+1. Parse the CLI; apply environment variables and defaults for options absent from the CLI (**CLI > ENV > Default**).
+2. Validate selected command scopes from root to leaf.
+3. Invoke argument callbacks, from root to leaf and in **specification order**, not token order. A repeatable flag calls its callback once per occurrence; repeated values call their callback once per value.
+4. Invoke the **selected leaf** command's handler (if registered). Parent command handlers do not run when a child is selected.
+
+Validation precedes all callbacks. Callback/handler failure stops dispatch; mutations performed by earlier callbacks are not rolled back. `Matches::view()` refers to the selected leaf even inside validators and handlers; `Matches::at(&[])` refers to the root.
+
+`OptSpec::{flag,value}` and `PosSpec::new` accept infallible callbacks. Their `*_try` counterparts accept typed user errors. For commands, use `CmdSpec::{handler,handler_try}` and `CmdSpec::{validator,validator_try}`. See [`try_handlers.rs`](examples/try_handlers.rs) for error handling and downcasting.
+
+### Syntax and scope
+
+- Short clusters such as `-vvj8`, long values such as `--jobs=8`, and next-token values such as `--jobs 8`.
+- Negative numbers are accepted as values/positionals; `--` stops option parsing.
+- `OsStr`/`OsString` arguments and callbacks preserve non-UTF-8 input.
+- Positionals may be required, unbounded (`many`), or bounded (`range(min, max)`); they are consumed greedily.
+- Groups: `GroupMode::Xor` (at most one) and `GroupMode::ReqOne` (at least one).
+- Subcommands have independent option scopes. Parent options are **not** accepted after selecting a child unless declared there too. Aliases are resolved to canonical command paths.
+- Single-valued options keep the last CLI value. For repeatable options, values are collected in order.
+
+## Derive (optional, 2.1.0)
+
+```toml
+rust-args-parser = { version = "2.1", features = ["derive"] }
+```
+
+The consumer imports only `rust-args-parser`. The proc-macro implementation is a build-time dependency, not a second API or parser. Rust requires attribute derives to be implemented in a separate `proc-macro` crate.
+
+See the runnable examples:
+
+- [`examples/derive_basic.rs`](examples/derive_basic.rs) — typed fields **and** argument/command callbacks
+- [`examples/derive_subcommands.rs`](examples/derive_subcommands.rs) — nested enum commands and leaf handlers
+
+```sh
+cargo run --features derive --example derive_basic -- -vv -j4 input.txt
+cargo run --features derive --example derive_subcommands -- remote add origin https://example.com
+```
+
+### Binding handlers
+
+Use `#[command(context = App)]` to select the same mutable context type passed to the existing parser. Declare function paths on fields and command variants:
 
 ```rust
-use rust_args_parser as ap;
-use std::ffi::OsStr;
+#[arg(short = 'v', action = "count", on_flag = inc_verbose)]
+verbose: u8,
 
-#[derive(Default, Debug)]
-struct Ctx {
-    verbose: u8,
-    json: bool,
-    jobs: Option<u32>,
-    input: Option<String>,
-}
+#[arg(long, on_value_try = set_port)]
+port: Option<u16>,
 
-fn inc_verbose(c: &mut Ctx) { c.verbose = c.verbose.saturating_add(1); }
-fn set_json(c: &mut Ctx) { c.json = true; }
-
-fn jobs_is_u32(v: &OsStr) -> Result<(), &'static str> {
-    v.to_string_lossy().parse::<u32>().map(|_| ()).map_err(|_| "invalid --jobs")
-}
-
-fn set_jobs(v: &OsStr, c: &mut Ctx) {
-    // Safe because `jobs_is_u32` validates first.
-    c.jobs = Some(v.to_string_lossy().parse::<u32>().unwrap());
-}
-
-fn set_input(v: &OsStr, c: &mut Ctx) { c.input = Some(v.to_string_lossy().into()); }
-
-fn main() -> ap::Result<()> {
-    // Global environment for parsing (and help rendering, if enabled)
-    let env = ap::Env { wrap_cols: 80, color: ap::ColorMode::Auto, suggest: true, auto_help: true, version: Some("2.0.1"), author: None };
-
-    // Command spec
-    let spec = ap::CmdSpec::new("demo")
-        .help("Demo tool")
-        .opt(ap::OptSpec::flag("verbose", inc_verbose).short('v').long("verbose").help("Enable verbose output"))
-        .opt(ap::OptSpec::flag("json", set_json).long("json").help("JSON output"))
-        .opt(ap::OptSpec::value("jobs", set_jobs).short('j').long("jobs").metavar("N").help("Worker threads").validator(jobs_is_u32))
-        .pos(ap::PosSpec::new("INPUT", set_input).range(0, 1));
-
-    let mut ctx = Ctx::default();
-    let argv: Vec<_> = std::env::args_os().skip(1).collect();
-
-    match ap::parse(&env, &spec, &argv, &mut ctx) {
-        Err(ap::Error::ExitMsg { code, message }) => {
-            if let Some(m) = message { println!("{}", m); }
-            std::process::exit(code);
-        }
-        Err(e) => { eprintln!("error: {e}"); std::process::exit(2); }
-        Ok(m) => {
-            println!("ctx   = {:?}", ctx);            // callbacks applied
-            println!("leaf  = {:?}", m.leaf_path());  // selected command path
-            Ok(())
-        }
-    }
-}
+#[command(handler = run)]
+Run,
 ```
 
-### CLI behavior
+Here `inc_verbose` has signature `fn(&mut App)`, `set_port` has signature `fn(&OsStr, &mut App) -> Result<(), E>`, and `run` has signature `fn(&Matches, &mut App)`. The `_try` functions require `E: std::error::Error + Send + Sync + 'static`. Use `handler_try` for fallible command handlers and `on_flag_try` for fallible flags. For positionals, `on_value` and `on_value_try` use the same signatures as value options.
 
-- **Short clusters**: `-vvj8` ⇒ `-v -v -j 8` (flag callback fires once per `-v`).
-- **Inline/next-arg values**: `-j8` / `-j 8`, `--jobs=8` / `--jobs 8`.
-- **Negative numbers**: `-d-3`, `--delta -3` are values (not options).
-- **End-of-options**: `--` makes the rest positional, even if they start with `-`.
-
-## Migration to 2.0.0
-
-Version **2.0.0** separates **parse-level** errors (unknown options, missing values, etc.) from **user callback** failures.
-
-### What changed
-
-- **Infallible by default**: `CmdSpec::handler`, `CmdSpec::validator`, `OptSpec::{flag,value}`, `PosSpec::new` callbacks now return `()`.
-- **Fallible variants**: use `*_try` (`handler_try`, `validator_try`, `flag_try`, `value_try`, `new_try`) when your callback needs to fail with a user-defined error:
-  - `Result<(), E>` where `E: std::error::Error + Send + Sync + 'static`
-- **Validators**:
-  - `validator(...)` accepts `Result<(), E>` where `E: std::fmt::Display` and maps failures to `Error::User(String)`.
-  - `validator_try(...)` accepts `Result<(), E>` where `E: std::error::Error + Send + Sync + 'static` and maps failures to `Error::UserAny(...)`.
-- `parse(...)` still returns `Result<Matches, rust_args_parser::Error>`. Parse errors are unchanged; user failures surface as `Error::User(...)` / `Error::UserAny(...)`.
-
-### Before / after
-
-**1.x (callbacks returned `ap::Result<()>`)**
+Parse and dispatch with an existing application context:
 
 ```rust
-use rust_args_parser as ap;
-use std::ffi::OsStr;
-
-fn set_jobs(v: &OsStr, ctx: &mut Ctx) -> ap::Result<()> {
-    ctx.jobs = Some(v.to_string_lossy().parse::<u32>().map_err(|_| ap::Error::User("invalid --jobs".into()))?);
-    Ok(())
-}
+let mut app = App::default();
+let cli = Cli::try_parse_from_with_context(std::env::args_os().skip(1), &mut app)?;
 ```
 
-**2.0.0 (infallible by default)**
+With `#[command(context = App)]`, annotate **each** derived `Parser`, `Args`, or `Subcommand` type that directly declares handlers or embeds another context-bound type. Types without a custom context may use the default `()`; handler-free types are reusable across contexts. There are no intermediate command structs to initialize: derive generates `CmdSpec` declarations and decodes the selected typed result.
 
-```rust
-use rust_args_parser as ap;
-use std::ffi::OsStr;
+Typed decoding is checked **before** dispatch, so an invalid `FromStr` value, missing required field, or count overflow cannot trigger callbacks. Explicit validators still run first. Callback execution uses the same core engine and ordering as the builder API.
 
-fn jobs_is_u32(v: &OsStr) -> Result<(), &'static str> {
-    v.to_string_lossy().parse::<u32>().map(|_| ()).map_err(|_| "invalid --jobs")
-}
+If you do not need handlers, plain `Cli::try_parse()` or `Cli::try_parse_from(args)` works; those methods create a default context. When an application context does not implement `Default`, use `try_parse_from_with_context` instead. `try_parse_from_with_context_and_env(&env, args, &mut app)` accepts custom help/version settings.
 
-fn set_jobs(v: &OsStr, ctx: &mut Ctx) {
-    // Safe because `jobs_is_u32` validates first.
-    ctx.jobs = Some(v.to_string_lossy().parse::<u32>().unwrap());
-}
+### Supported attributes
 
-let spec = ap::CmdSpec::new("tool")
-    .opt(ap::OptSpec::value("jobs", set_jobs).long("jobs").validator(jobs_is_u32));
-```
+`#[derive(Parser)]` declares the root struct, `#[derive(Args)]` reusable named-field arguments, and `#[derive(Subcommand)]` enum commands. Subcommand variants may be unit, named-field, or a tuple containing one `Args` type.
 
-**2.0.0 (fallible user callback, typed error)**
+- `#[command(name = "...", help = "...", alias = "...")]`; `alias` applies to enum variants.
+- `#[command(context = App)]`, `#[command(handler = run)]` / `#[command(handler_try = run_try)]`, and `#[command(validate = check)]` / `#[command(validate_try = check_try)]`. Each pair is mutually exclusive.
+- `#[command(group(name = "output", mode = "xor"))]` or `mode = "req_one"`.
+- `#[arg(short, long, name = "...", value_name = "...", help = "...")]`; fields without `short`/`long` default to `--kebab-case`.
+- `#[arg(positional, required, min = 1, max = 3)]` — `min`/`max` require `Vec<T>` and both must be given.
+- `#[arg(action = "count")]` on an integer, `bool` flags, `Option<T>` optional values, and `Vec<T>` repeated values/positionals.
+- `#[arg(env = "VAR", default_value = "text", group = "output")]`; defaults are literal strings.
+- `#[arg(value_parser = check)]` / `value_parser_try`; `on_flag` / `on_flag_try` for flags, `on_value` / `on_value_try` for values and positionals. Use one form from each pair.
+- `#[command(flatten)]` embeds `Args` in the current scope; `#[command(subcommand)]` selects `Subcommand` or `Option<Subcommand>`.
 
-```rust
-use rust_args_parser as ap;
-use std::{error::Error, ffi::OsStr, fmt};
+Field values use strict UTF-8 `FromStr` conversion. `OsString` and `PathBuf` retain native OS values. `Matches`, scoped views, source provenance, help/version errors, aliases, and existing validators retain the core parser's behavior.
 
-#[derive(Debug)]
-struct AppError(&'static str);
-impl fmt::Display for AppError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.0) } }
-impl Error for AppError {}
+**Current limitations:** named structs without generics, no flatten collision detection, no inherited global options, and no clap-style value enum support. Flattened `Args` should not install a competing command handler for the same command. The derive feature does not change the manual callback API.
 
-fn set_jobs_try(v: &OsStr, ctx: &mut Ctx) -> Result<(), AppError> {
-    let n = v.to_string_lossy().parse::<u32>().map_err(|_| AppError("invalid --jobs"))?;
-    ctx.jobs = Some(n);
-    Ok(())
-}
+## Features
 
-let spec = ap::CmdSpec::new("tool")
-    .opt(ap::OptSpec::value_try("jobs", set_jobs_try).long("jobs"));
-```
+Default features: `help`, `suggest`, `color`. The `derive` feature is off by default.
 
----
-
-## Subcommands
-
-Subcommands are nested `CmdSpec`s and **scoped**.
-
-```rust
-use rust_args_parser as ap; use std::ffi::OsStr;
-#[derive(Default)] struct Ctx { remote: Option<String>, branch: Option<String>, files: Vec<String> }
-fn set_remote(v: &OsStr, c: &mut Ctx) { c.remote = Some(v.to_string_lossy().into()); }
-fn set_branch(v: &OsStr, c: &mut Ctx) { c.branch = Some(v.to_string_lossy().into()); }
-fn push_file(v: &OsStr, c: &mut Ctx) { c.files.push(v.to_string_lossy().into()); }
-
-let spec = ap::CmdSpec::new("tool")
-    .subcmd(
-        ap::CmdSpec::new("repo")
-            .alias("r")
-            .subcmd(
-                ap::CmdSpec::new("push")
-                    .pos(ap::PosSpec::new("REMOTE", set_remote).required())
-                    .pos(ap::PosSpec::new("BRANCH", set_branch).required())
-                    .pos(ap::PosSpec::new("FILE", push_file).many())
-            )
-    );
-
-let mut ctx = Ctx::default();
-let m = ap::parse(&env, &spec, &argv, &mut ctx)?;
-assert_eq!(m.leaf_path(), vec!["repo", "push"]);
-let v = m.view();
-assert_eq!(v.pos_one("BRANCH").unwrap(), OsStr::new("main"));
-```
-
-> Root options are **not** accepted after you descend into a subcommand unless re-declared at that level.
-
----
-
-## Options, positionals, groups, validators
-
-### Options
-
-- **Flag**: `OptSpec::flag("name", on_flag)`
-- **Value**: `OptSpec::value("name", on_value)`
-- Builders: `.short('j')`, `.long("jobs")`, `.metavar("N")`, `.help("…")`, `.env("VAR")`, `.default(OsString)`, `.group("name")`, `.repeatable()`, `.validator(fn)`
-
-### Positionals
-
-- `PosSpec::new("NAME", on_value)` then choose one:
-  - `.required()`
-  - `.many()` (0..∞)
-  - `.range(min, max)`
-- Also `.help("…")`, `.validator(fn)`.
-
-### Groups
-
-- `GroupMode::Xor` — options in the same group are mutually exclusive.
-- `GroupMode::ReqOne` — require at least one option from the group.
-
-```rust
-let spec = ap::CmdSpec::new("fmt")
-    .opt(ap::OptSpec::flag("json", |_| Ok(())).long("json").group("fmt"))
-    .opt(ap::OptSpec::flag("yaml", |_| Ok(())).long("yaml").group("fmt"))
-    .group("fmt", ap::GroupMode::Xor);
-```
-
-### Validators
-
-Validators run on **CLI, ENV, and Default** values. If a validator fails, the callback for that option/positional is not invoked.
-
----
-
-## Overlays & provenance
-
-- **Precedence**: **CLI > ENV > Default**.
-- Bind ENV via `.env("NAME")`, defaults via `.default(…)`.
-- Check where a value came from with `matches.is_set_from(name, Source::{Cli,Env,Default})`.
-- `Matches` is **scoped**: use `m.view()` for the leaf command or `m.at(&[])` for root.
-
----
-
-## Built-ins & features
-
-Feature flags (enabled by default unless you disable `default-features`):
-
-- `help` — built-in `-h/--help` and `--version` returning `Error::ExitMsg { code: 0, message }`.
-- `color` — colorized help output (honors `NO_COLOR`), with `ColorMode::{Auto,Always,Never}`.
-- `suggest` — suggestions for unknown options/commands.
-
----
-
-## Matches & views
-
-`Matches` collects everything the parser saw. `MatchView` gives you a scoped, read-only accessor.
-
-```rust
-let m: ap::Matches = ap::parse(&env, &spec, &argv, &mut ctx)?;
-let leaf = m.view();          // leaf scope
-let root = m.at(&[]);         // root scope
-
-leaf.is_set("verbose");
-root.is_set_from("limit", ap::Source::Env);
-leaf.value("jobs");          // first value
-leaf.values("file");         // all values for an option
-leaf.pos_one("INPUT");       // single positional by name
-leaf.pos_many("FILE");        // all positionals with that name
-```
-
-> Flags are stored as presence (`Value::Flag`). The parser also counts flag **occurrences** internally so `-vvv` calls the flag callback three times.
-
----
-
-## Errors
-
-Top-level error type: `ap::Error`.
-
-- `Error::User(String)` / `Error::UserAny(Box<dyn Error + Send + Sync>)`
-- `Error::Parse(String)`
-- `Error::ExitMsg { code, message }`
-- Structured diagnostics:
-  - `UnknownOption { token, suggestions }`
-  - `UnknownCommand { token, suggestions }`
-  - `MissingValue { opt }`
-  - `UnexpectedPositional { token }`
-
-Typical handling:
-
-```rust
-match ap::parse(&env, &spec, &argv, &mut ctx) {
-    Err(ap::Error::ExitMsg { code, message }) => { if let Some(m) = message { println!("{}", m); } std::process::exit(code) }
-    Err(e) => { eprintln!("error: {e}"); std::process::exit(2) }
-    Ok(m) => { /* use ctx and/or m */ }
-}
-```
-
----
-
-## Utilities (`ap::util`)
-
-- `looks_like_number_token(&str) -> bool` — `-1`, `+3.14`, `-.5`, `1e3`, `-1.2e-3`.
-- `strip_ansi_len(&str) -> usize` — visible length, ignoring minimal ANSI sequences used in help.
-
----
-
-## Examples
-
-See `examples/`:
-
-- `basic.rs` — flags, values, callbacks, errors
-- `try_handlers.rs` — `*_try` callbacks with typed user errors
-- `subcommands.rs` — nested commands, leaf scoping
-- `env_defaults.rs` — ENV/default precedence
-- `git.rs` — realistic multi-command layout
-
-Run:
-
-```bash
-cargo run --example basic -- --help
-```
-
----
+- `help` — built-in `-h`/`--help` and optional version/author messages (`Error::ExitMsg`).
+- `suggest` — spelling suggestions for unknown commands and options.
+- `color` — ANSI help coloring, honoring terminal preferences.
+- `derive` — procedural derives and typed decoding/event bindings.
 
 ## Testing
 
-A comprehensive test suite covers options/positionals, subcommands, groups, overlays, validators, suggestions, help, utils, and an end-to-end **golden** test.
-
-```bash
-cargo test --features "help suggest color"
-# or core only
-cargo test
+```sh
+cargo test --locked --workspace --all-features --all-targets
+cargo test --locked --no-default-features
+cargo test --locked --no-default-features --features derive
+cargo clippy --workspace --all-features --all-targets -- -D warnings
 ```
 
----
+See [CHANGELOG.md](CHANGELOG.md) for the 2.0.0 callback error API changes and the 2.0.1 bug fixes.
 
-## License
-
-Dual-licensed under **MIT** or **Apache-2.0** at your option.
+For a 2.1.0 crates.io release, publish the `derive/` implementation package first (once), then the main package. Cargo requires the optional proc-macro dependency to exist on the registry before the main crate can be published.

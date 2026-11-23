@@ -21,3 +21,13 @@ pub use suggest::*;
 
 pub mod util;
 pub use util::*;
+
+#[cfg(feature = "derive")]
+pub mod derive_api;
+#[cfg(feature = "derive")]
+pub use derive_api::{Args, Parser, Subcommand};
+#[cfg(feature = "derive")]
+pub use rust_args_parser_derive::{Args, Parser, Subcommand};
+
+#[cfg(feature = "derive")]
+extern crate self as rust_args_parser;

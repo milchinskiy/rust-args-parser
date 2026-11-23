@@ -15,6 +15,24 @@ pub fn parse<'a, Ctx: ?Sized>(
     argv: &[OsString],
     ctx: &mut Ctx,
 ) -> Result<Matches> {
+    parse_checked(env, root, argv, ctx, |_| Ok(()))
+}
+
+/// Shared parser path. Derive decodes typed values after validation but before
+/// callbacks and handlers, so failed typed conversions cannot dispatch events.
+/// # Errors
+/// Returns [`Error`] when parsing, validation, the supplied check, or an
+/// argument/command callback fails.
+pub fn parse_checked<'a, Ctx: ?Sized, F>(
+    env: &Env,
+    root: &'a CmdSpec<'a, Ctx>,
+    argv: &[OsString],
+    ctx: &mut Ctx,
+    check: F,
+) -> Result<Matches>
+where
+    F: FnOnce(&Matches) -> Result<()>,
+{
     let mut m = Matches::new();
     let mut cursor = ParseCursor::new(root);
     let mut i = 0usize;
@@ -73,6 +91,7 @@ pub fn parse<'a, Ctx: ?Sized>(
         Ok(())
     })?;
     walk_levels(&cursor.stack, |path, cmd| validate_level(&m, path, cmd))?;
+    check(&m)?;
     walk_levels(&cursor.stack, |path, cmd| run_callbacks(&m, path, cmd, ctx))?;
     // Execute **leaf** command handler if any
     if let Some(leaf) = cursor.stack.last() {

@@ -7,6 +7,24 @@ Prior to 1.0.0, minor version bumps may include breaking changes.
 
 ---
 
+## [2.1.0]
+
+### Added
+
+- Optional `derive` feature for typed `Parser`, `Args`, and `Subcommand` declarations, backed by the existing `CmdSpec` parser.
+- Direct event bindings for `on_flag`, `on_value`, `handler` and fallible `_try` variants, with a user-owned mutable context.
+- Typed decoding is checked after core validation but before argument callbacks and the selected leaf handler.
+- Nested subcommand derives, aliases, flattened arguments, count flags, groups, validators, environment/default values, and non-UTF-8 paths.
+- Derive command descriptions use `#[command(help = "...")]`, consistent with `#[arg(help = "...")]`.
+- Derive integration tests and callback-driven examples. The feature is documented in the README; no separate documentation tree.
+
+### Compatibility
+
+- Derive is disabled by default. Builder API behavior and public signatures remain unchanged.
+- Rust requires a small procedural-macro crate as the derive implementation; consumers only depend on `rust-args-parser`.
+
+---
+
 ## [2.0.1]
 
 ### Fixed
