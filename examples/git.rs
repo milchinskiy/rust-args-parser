@@ -342,7 +342,7 @@ fn build_spec<'a>() -> rapp::CmdSpec<'a, GitCtx> {
                 .validator(|m| {
                     let v = m.view();
                     let have_new = v.value("new").is_some();
-                    let have_branch = v.value("BRANCH").is_some();
+                    let have_branch = v.pos_one("BRANCH").is_some();
                     if !have_new && !have_branch {
                         return Err("checkout needs -b NAME or BRANCH");
                     }
@@ -352,7 +352,8 @@ fn build_spec<'a>() -> rapp::CmdSpec<'a, GitCtx> {
 }
 
 fn main() {
-    let mut env = rapp::Env { version: Some("2.0.0"), author: Some("The Demo Team"), ..Default::default() };
+    let mut env =
+        rapp::Env { version: Some(env!("CARGO_PKG_VERSION")), author: Some("The Demo Team"), ..Default::default() };
     env.wrap_cols = 100;
 
     let argv: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();

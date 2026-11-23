@@ -17,7 +17,6 @@ pub fn parse<'a, Ctx: ?Sized>(
 ) -> Result<Matches> {
     let mut m = Matches::new();
     let mut cursor = ParseCursor::new(root);
-    cursor.eager_overlay_here(&mut m);
     let mut i = 0usize;
     while i < argv.len() {
         let tok = &argv[i];
@@ -33,7 +32,6 @@ pub fn parse<'a, Ctx: ?Sized>(
             if let Some(sub) = try_select_subcommand(cursor.current, tok) {
                 cursor.descend(sub);
                 i += 1;
-                cursor.eager_overlay_here(&mut m);
                 continue;
             }
             if let Some(consumed) = try_parse_long(env, cursor.current, &mut m, &cursor.path, &cursor.long_ix, argv, i)?
@@ -66,10 +64,15 @@ pub fn parse<'a, Ctx: ?Sized>(
         return Err(Error::UnexpectedPositional { token: os_dbg(tok) });
     }
 
+    // leaf-scoped accessors must work during validators and handlers, not only after parsing
+    m.set_leaf_path(&cursor.path);
+    // complete all overlays before any validation so cross-scope validators see
+    // the same finalized Matches as callbacks and handlers.
     walk_levels(&cursor.stack, |path, cmd| {
         overlay_env_and_defaults(&mut m, path, cmd);
-        validate_level(&m, path, cmd)
+        Ok(())
     })?;
+    walk_levels(&cursor.stack, |path, cmd| validate_level(&m, path, cmd))?;
     walk_levels(&cursor.stack, |path, cmd| run_callbacks(&m, path, cmd, ctx))?;
     // Execute **leaf** command handler if any
     if let Some(leaf) = cursor.stack.last() {
@@ -77,7 +80,6 @@ pub fn parse<'a, Ctx: ?Sized>(
             h(&m, ctx)?;
         }
     }
-    m.set_leaf_path(&cursor.path);
     Ok(m)
 }
 
@@ -592,9 +594,5 @@ impl<'a, Ctx: ?Sized> ParseCursor<'a, Ctx> {
         self.pos_idx = 0;
         self.pos_counts = vec![0; self.current.get_positionals().len()];
         self.rebuild_indexes();
-    }
-    fn eager_overlay_here(&self, m: &mut Matches) {
-        eager_overlay(m, &self.path, self.current, Source::Env);
-        eager_overlay(m, &self.path, self.current, Source::Default);
     }
 }

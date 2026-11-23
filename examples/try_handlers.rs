@@ -96,7 +96,7 @@ fn handler(_m: &rapp::Matches, c: &mut Ctx) -> Result<(), AppErr> {
 }
 
 fn main() {
-    let env = rapp::Env { version: Some("2.0.0"), ..Default::default() };
+    let env = rapp::Env { version: Some(env!("CARGO_PKG_VERSION")), ..Default::default() };
 
     let root = rapp::CmdSpec::new("try-demo")
         .help("Demonstrate *_try callbacks with typed user errors")

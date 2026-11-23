@@ -46,7 +46,7 @@ fn jobs_is_u32(v: &OsStr) -> Result<(), &'static str> {
 }
 
 fn main() {
-    let mut env = rapp::Env { version: Some("2.0.0"), ..Default::default() };
+    let mut env = rapp::Env { version: Some(env!("CARGO_PKG_VERSION")), ..Default::default() };
     env.wrap_cols = 120;
 
     let root = rapp::CmdSpec::new("demo")

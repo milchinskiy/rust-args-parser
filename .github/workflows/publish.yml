@@ -74,9 +74,9 @@ jobs:
       - name: Read crate name & version
         id: meta
         run: |
-          JSON=$(cargo metadata --no-deps --format-version=1 --manifest-path "${{ inputs.crate_path }}/Cargo.toml")
-          NAME=$(echo "$JSON" | jq -r '.packages[0].name')
-          VER=$(echo "$JSON" | jq -r '.packages[0].version')
+          JSON=$(cargo read-manifest --manifest-path "${{ inputs.crate_path }}/Cargo.toml")
+          NAME=$(echo "$JSON" | jq -r '.name')
+          VER=$(echo "$JSON" | jq -r '.version')
           echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "Crate: $NAME@$VER"
@@ -101,7 +101,12 @@ jobs:
           VER='${{ steps.meta.outputs.version }}'
           # jq should be present; install if missing
           if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
-          EXIST=$(curl -fsSL "https://crates.io/api/v1/crates/$NAME" | jq -r --arg v "$VER" '.versions[].num | select(.==$v)')
+          STATUS=$(curl -sS -o /tmp/rap-crate.json -w '%{http_code}' "https://crates.io/api/v1/crates/$NAME")
+          case "$STATUS" in
+            200) EXIST=$(jq -r --arg v "$VER" '.versions[].num | select(.==$v)' /tmp/rap-crate.json) ;;
+            404) EXIST='' ;;
+            *) echo "::error::Unexpected crates.io HTTP status: $STATUS"; exit 1 ;;
+          esac
           if [ -n "$EXIST" ]; then
             echo "::error::Version $NAME@$VER already exists on crates.io"; exit 1; fi
           echo "Version availability OK."

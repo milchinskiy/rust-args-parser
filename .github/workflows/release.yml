@@ -34,7 +34,8 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: |
-          cargo test --locked --lib --tests --verbose
+          cargo test --locked --workspace --all-features --all-targets --verbose
+          cargo test --locked --no-default-features --verbose
   release:
     name: Create GitHub Release
     needs: test
@@ -79,9 +80,9 @@ jobs:
       - name: Read crate name & version
         id: meta
         run: |
-          JSON=$(cargo metadata --no-deps --format-version=1)
-          echo "name=$(echo "$JSON" | jq -r '.packages[0].name')" >> $GITHUB_OUTPUT
-          echo "version=$(echo "$JSON" | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
+          JSON=$(cargo read-manifest --manifest-path Cargo.toml)
+          echo "name=$(echo "$JSON" | jq -r '.name')" >> "$GITHUB_OUTPUT"
+          echo "version=$(echo "$JSON" | jq -r '.version')" >> "$GITHUB_OUTPUT"
       - name: Verify tag matches version
         run: |
           set -euo pipefail

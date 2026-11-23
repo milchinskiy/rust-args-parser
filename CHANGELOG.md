@@ -7,6 +7,18 @@ Prior to 1.0.0, minor version bumps may include breaking changes.
 
 ---
 
+## [2.0.1]
+
+### Fixed
+
+- Environment/default values are applied only when the corresponding CLI option is absent. Repeatable values no longer append environment/default values to CLI values, and a CLI flag no longer inherits an additional environment occurrence.
+- The selected leaf command path is set before command validation, callbacks, and the leaf handler. Scoped `Matches::view()` now works inside handlers.
+- All selected scopes receive overlays before command validators run, so cross-scope validation sees final values.
+
+No public API changes.
+
+---
+
 ## [2.0.0]
 
 ### 🚨 Breaking changes
@@ -44,7 +56,7 @@ Prior to 1.0.0, minor version bumps may include breaking changes.
 - **Options API:** unified constructors
   - flags: `OptSpec::flag("name", fn(&mut Ctx)->Result<()>)`
   - values: `OptSpec::value("name", fn(&OsStr, &mut Ctx)->Result<()>)`
-  With builders: `.short() .long() .metavar() .help() .env() .default() .group() .repeat() .validator()`
+    With builders: `.short() .long() .metavar() .help() .env() .default() .group() .repeat() .validator()`
 - **Positionals API:** use `.required()`, `.many()`, or `.range(min, max)` (replaces older `.one()`/legacy variants).
 - **Args type:** `&[&str]` → `&[OsString]` (non-UTF-8 safe).
 - **Features:** removed the unused **`completions`** feature flag.
@@ -67,7 +79,7 @@ Prior to 1.0.0, minor version bumps may include breaking changes.
 
 ### 🐛 Fixed
 
-- Optional positional greediness after `--` no longer swallows the first token that *looks* like an option.
+- Optional positional greediness after `--` no longer swallows the first token that _looks_ like an option.
 - Leading `+` in numeric tokens recognized by `util::looks_like_number_token`.
 
 ### 📦 Migration guide (0.4 → 1.0)

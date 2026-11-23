@@ -27,11 +27,12 @@ fn handle_remote_add(m: &rapp::Matches, c: &mut Ctx) {
         c.url.as_deref()
     );
     // You can also read from Matches if you prefer keys:
-    let _name = m.get_value("NAME");
+    let _name = m.get_position_one("NAME");
 }
 
 fn main() {
-    let env = rapp::Env { version: Some("2.0.0"), author: Some("Rust Args Parser"), ..Default::default() };
+    let env =
+        rapp::Env { version: Some(env!("CARGO_PKG_VERSION")), author: Some("Rust Args Parser"), ..Default::default() };
 
     let remote_add = rapp::CmdSpec::new("add")
         .help("Add a remote")

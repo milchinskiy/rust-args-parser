@@ -50,7 +50,7 @@ fn set_input(v: &OsStr, c: &mut Ctx) { c.input = Some(v.to_string_lossy().into()
 
 fn main() -> ap::Result<()> {
     // Global environment for parsing (and help rendering, if enabled)
-    let env = ap::Env { wrap_cols: 80, color: ap::ColorMode::Auto, suggest: true, auto_help: true, version: Some("2.0.0"), author: None };
+    let env = ap::Env { wrap_cols: 80, color: ap::ColorMode::Auto, suggest: true, auto_help: true, version: Some("2.0.1"), author: None };
 
     // Command spec
     let spec = ap::CmdSpec::new("demo")
@@ -256,7 +256,7 @@ root.is_set_from("limit", ap::Source::Env);
 leaf.value("jobs");          // first value
 leaf.values("file");         // all values for an option
 leaf.pos_one("INPUT");       // single positional by name
-leaf.pos_all("FILE");        // all positionals with that name
+leaf.pos_many("FILE");        // all positionals with that name
 ```
 
 > Flags are stored as presence (`Value::Flag`). The parser also counts flag **occurrences** internally so `-vvv` calls the flag callback three times.
