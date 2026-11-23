@@ -16,7 +16,7 @@ Prior to 1.0.0, minor version bumps may include breaking changes.
 - Typed decoding is checked after core validation but before argument callbacks and the selected leaf handler.
 - Nested subcommand derives, aliases, flattened arguments, count flags, groups, validators, environment/default values, and non-UTF-8 paths.
 - Derive command descriptions use `#[command(help = "...")]`, consistent with `#[arg(help = "...")]`.
-- Derive integration tests and callback-driven examples. The feature is documented in the README; no separate documentation tree.
+- Derive integration tests and callback-driven examples.
 
 ### Compatibility
 

@@ -125,7 +125,3 @@ cargo test --locked --no-default-features
 cargo test --locked --no-default-features --features derive
 cargo clippy --workspace --all-features --all-targets -- -D warnings
 ```
-
-See [CHANGELOG.md](CHANGELOG.md) for the 2.0.0 callback error API changes and the 2.0.1 bug fixes.
-
-For a 2.1.0 crates.io release, publish the `derive/` implementation package first (once), then the main package. Cargo requires the optional proc-macro dependency to exist on the registry before the main crate can be published.
