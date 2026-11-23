@@ -3,20 +3,30 @@ name: Test, Release & (optional) Publish
 on:
   push:
     tags: [v*]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish (e.g. v2.0.1)
+        required: true
+        type: string
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 jobs:
   test:
     name: Test on stable
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo registry + build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -39,28 +49,32 @@ jobs:
   release:
     name: Create GitHub Release
     needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - name: Create GitHub Release (auto notes)
-        uses: softprops/action-gh-release@v2
+        uses: actions/checkout@v6
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Create GitHub Release (auto notes)
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
   publish-dry-run:
     name: Cargo publish — dry run
     needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
+          ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0  # need tags
       - name: Install jq
         run: |
@@ -68,7 +82,7 @@ jobs:
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo registry + build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -86,15 +100,22 @@ jobs:
       - name: Verify tag matches version
         run: |
           set -euo pipefail
-          TAG="v${{ steps.meta.outputs.version }}"
-          echo "Expecting tag: $TAG"
-          git fetch --tags --quiet
-          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "::error::Required tag '$TAG' does not exist."; exit 1; fi
+          EXPECTED="v${{ steps.meta.outputs.version }}"
+          if [[ "$RELEASE_TAG" != "$EXPECTED" ]]; then
+            echo "::error::Requested tag '$RELEASE_TAG' does not match crate version '$EXPECTED'."
+            exit 1
+          fi
+          if ! TAG_SHA=$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}"); then
+            echo "::error::Tag '$RELEASE_TAG' was not found in the checkout."
+            exit 1
+          fi
           HEAD=$(git rev-parse HEAD)
-          TAG_SHA=$(git rev-list -n 1 "$TAG")
-          if [ "$HEAD" != "$TAG_SHA" ]; then
-            echo "::error::Tag '$TAG' does not point to HEAD ($HEAD != $TAG_SHA)."; exit 1; fi
+          echo "Checkout: $HEAD"
+          echo "Tag $RELEASE_TAG: $TAG_SHA"
+          if [[ "$HEAD" != "$TAG_SHA" ]]; then
+            echo "::error::Tag '$RELEASE_TAG' does not point to the checked-out commit."
+            exit 1
+          fi
           echo "Tag check OK."
       - name: Ensure version not already published (crates.io)
         run: |
@@ -128,13 +149,14 @@ jobs:
     name: Cargo publish — live (requires approval)
     needs: publish-dry-run
     # Only for stable tags (skip pre-releases like v1.2.0-rc1)
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-latest
     environment: crates-io
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
+          ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable

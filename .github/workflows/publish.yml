@@ -3,6 +3,11 @@ name: Publish to crates.io (manual, protected)
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: Existing version tag to check out (e.g. v2.0.1)
+        required: false
+        type: string
+        default: ''
       dry_run:
         description: Do a dry run (no publish)?
         required: true
@@ -46,13 +51,14 @@ jobs:
     environment: crates-io
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0  # needed for tags
+          ref: ${{ inputs.release_tag || github.ref_name }}
+          fetch-depth: 0  # needed for tag verification
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo registry + build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -82,17 +88,26 @@ jobs:
           echo "Crate: $NAME@$VER"
       - name: Verify tag matches version (optional)
         if: ${{ inputs.require_tag == true }}
+        env:
+          EXPECTED_TAG: ${{ inputs.tag_prefix }}${{ steps.meta.outputs.version }}
+          TARGET_REF: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          TAG="${{ inputs.tag_prefix }}${{ steps.meta.outputs.version }}"
-          echo "Expecting tag: $TAG"
-          git fetch --tags --quiet
-          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "::error::Required tag '$TAG' does not exist."; exit 1; fi
+          if [[ "$TARGET_REF" != "$EXPECTED_TAG" ]]; then
+            echo "::error::Selected ref '$TARGET_REF' must be tag '$EXPECTED_TAG'."
+            exit 1
+          fi
+          if ! TAG_SHA=$(git rev-parse --verify "refs/tags/${EXPECTED_TAG}^{commit}"); then
+            echo "::error::Required tag '$EXPECTED_TAG' was not found in the checkout."
+            exit 1
+          fi
           HEAD=$(git rev-parse HEAD)
-          TAG_SHA=$(git rev-list -n 1 "$TAG")
-          if [ "$HEAD" != "$TAG_SHA" ]; then
-            echo "::error::Tag '$TAG' does not point to HEAD ($HEAD != $TAG_SHA)."; exit 1; fi
+          echo "Checkout: $HEAD"
+          echo "Tag $EXPECTED_TAG: $TAG_SHA"
+          if [[ "$HEAD" != "$TAG_SHA" ]]; then
+            echo "::error::Tag '$EXPECTED_TAG' does not point to the checked-out commit."
+            exit 1
+          fi
           echo "Tag check OK."
       - name: Ensure version not already published
         run: |
@@ -121,7 +136,7 @@ jobs:
           cargo package --locked --manifest-path "${{ inputs.crate_path }}/Cargo.toml"
       - name: Upload .crate artifact (optional)
         if: ${{ inputs.upload_artifact == true }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.name }}-${{ steps.meta.outputs.version }}.crate
           path: target/package/*.crate
