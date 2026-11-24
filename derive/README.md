@@ -1,8 +1,5 @@
 # rust-args-parser-derive
 
-Procedural macro implementation for the optional `derive` feature of
-[`rust-args-parser`](https://crates.io/crates/rust-args-parser).
+Procedural macros for `rust-args-parser`. Enable the `derive` feature on the main crate; this package is an implementation dependency.
 
-Use `rust-args-parser` with its `derive` feature enabled rather than
-depending on this implementation crate directly. See the main crate README
-for usage and examples.
+See the [main README](https://github.com/milchinskiy/rust-args-parser#derive-optional) and the derive examples.

@@ -27,3 +27,22 @@ fn help_emits_and_exits() {
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+#[test]
+fn render_help_uses_command_name_and_respects_never_color() {
+    let env = env_basic();
+    let root = ap::CmdSpec::<()>::new("tool")
+        .help("A tool")
+        .opt(ap::OptSpec::flag("verbose", |(): &mut ()| {}).long("verbose"));
+    let help = ap::render_help(&env, &root);
+    assert!(help.contains("tool [options]"), "{help}");
+    assert!(!help.contains('\x1b'), "ColorMode::Never must not emit ANSI escapes");
+}
+
+#[cfg(feature = "color")]
+#[test]
+fn always_color_overrides_terminal_detection() {
+    let env = ap::Env { color: ap::ColorMode::Always, ..env_basic() };
+    let root = ap::CmdSpec::<()>::new("tool");
+    assert!(ap::render_help(&env, &root).contains('\x1b'));
+}

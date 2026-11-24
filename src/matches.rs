@@ -17,48 +17,44 @@ pub enum Status {
     Set(Source),
 }
 
-/// Prefix used to differentiate positional keys.
-const POS_PREFIX: &str = "@pos";
-
-/// Join a command path and logical name into the internal key (options/flags).
-#[must_use]
-pub fn key_for(path: &[&str], name: &str) -> String {
-    if path.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}.{}", path.join("."), name)
+// Components are length-prefixed to keep dotted names and nested scopes distinct.
+// The argument kind is part of the key, so options cannot collide with positionals.
+fn scoped_key<'a>(kind: char, path: impl IntoIterator<Item = &'a str>, name: &str) -> String {
+    let mut key = kind.to_string();
+    for segment in path {
+        key.push_str(&segment.len().to_string());
+        key.push(':');
+        key.push_str(segment);
     }
+    key.push('|');
+    key.push_str(&name.len().to_string());
+    key.push(':');
+    key.push_str(name);
+    key
 }
 
-/// Join a command path and positional name into the internal key.
+/// Build an unambiguous internal key for an option in a command scope.
+#[must_use]
+pub fn key_for(path: &[&str], name: &str) -> String {
+    scoped_key('o', path.iter().copied(), name)
+}
+
+/// Build an unambiguous internal key for a positional in a command scope.
 #[must_use]
 pub fn pos_key_for(path: &[&str], name: &str) -> String {
-    if path.is_empty() {
-        format!("{POS_PREFIX}.{name}")
-    } else {
-        format!("{}.{}.{}", path.join("."), POS_PREFIX, name)
-    }
+    scoped_key('p', path.iter().copied(), name)
 }
 
 fn key_for_strings(path: &[String], name: &str) -> String {
-    if path.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}.{}", path.join("."), name)
-    }
+    scoped_key('o', path.iter().map(String::as_str), name)
 }
 
-/// Same as `pos_key_for`, but for an owned `Vec<String>` without temporaries.
 fn pos_key_for_strings(path: &[String], name: &str) -> String {
-    if path.is_empty() {
-        format!("{POS_PREFIX}.{name}")
-    } else {
-        format!("{}.{}.{}", path.join("."), POS_PREFIX, name)
-    }
+    scoped_key('p', path.iter().map(String::as_str), name)
 }
 
-/// All parsed values and their sources. Internally keyed by flattened strings.
-/// We add `leaf_path` so callers can query *scoped* without spelling keys.
+/// All parsed values and their sources, stored under unambiguous scoped keys.
+/// `leaf_path` allows callers to inspect the selected command.
 #[derive(Debug)]
 pub struct Matches {
     pub(crate) values: HashMap<String, Value>,

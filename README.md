@@ -6,8 +6,6 @@ A small, callback-driven CLI parser for Rust. Define commands with `CmdSpec`, at
 
 ## Start here
 
-The existing builder API is unchanged. It works without macros or additional runtime dependencies.
-
 - [`examples/basic.rs`](examples/basic.rs) — flags, values, validators, required positionals, groups
 - [`examples/subcommands.rs`](examples/subcommands.rs) — aliases, nested commands, leaf handlers
 - [`examples/try_handlers.rs`](examples/try_handlers.rs) — fallible callbacks and typed errors
@@ -28,6 +26,8 @@ cargo run --example subcommands -- remote add origin
 3. Invoke argument callbacks, from root to leaf and in **specification order**, not token order. A repeatable flag calls its callback once per occurrence; repeated values call their callback once per value.
 4. Invoke the **selected leaf** command's handler (if registered). Parent command handlers do not run when a child is selected.
 
+Invalid command specifications (duplicate names/switches, reserved built-ins, invalid positional cardinality, or unreachable positionals) are rejected before parsing. An unbounded positional must be last; `range(min, max)` requires `1 <= max` and `min <= max`.
+
 Validation precedes all callbacks. Callback/handler failure stops dispatch; mutations performed by earlier callbacks are not rolled back. `Matches::view()` refers to the selected leaf even inside validators and handlers; `Matches::at(&[])` refers to the root.
 
 `OptSpec::{flag,value}` and `PosSpec::new` accept infallible callbacks. Their `*_try` counterparts accept typed user errors. For commands, use `CmdSpec::{handler,handler_try}` and `CmdSpec::{validator,validator_try}`. See [`try_handlers.rs`](examples/try_handlers.rs) for error handling and downcasting.
@@ -42,71 +42,69 @@ Validation precedes all callbacks. Callback/handler failure stops dispatch; muta
 - Subcommands have independent option scopes. Parent options are **not** accepted after selecting a child unless declared there too. Aliases are resolved to canonical command paths.
 - Single-valued options keep the last CLI value. For repeatable options, values are collected in order.
 
-## Derive (optional, 2.1.0)
+## Derive (optional)
 
 ```toml
-rust-args-parser = { version = "2.1", features = ["derive"] }
+rust-args-parser = { version = "3", features = ["derive"] }
 ```
 
-The consumer imports only `rust-args-parser`. The proc-macro implementation is a build-time dependency, not a second API or parser. Rust requires attribute derives to be implemented in a separate `proc-macro` crate.
+Derive uses the same parser and validation rules as `CmdSpec`. It creates the
+actual Rust values first, then runs callbacks and the selected command handler
+on those values. No separate application context or default-constructed state
+is needed. Handlers see final decoded field values.
 
-See the runnable examples:
-
-- [`examples/derive_basic.rs`](examples/derive_basic.rs) — typed fields **and** argument/command callbacks
-- [`examples/derive_subcommands.rs`](examples/derive_subcommands.rs) — nested enum commands and leaf handlers
+- [`examples/derive_basic.rs`](examples/derive_basic.rs) — argument events and a root handler
+- [`examples/derive_subcommands.rs`](examples/derive_subcommands.rs) — nested commands, aliases and leaf handlers
 
 ```sh
 cargo run --features derive --example derive_basic -- -vv -j4 input.txt
 cargo run --features derive --example derive_subcommands -- remote add origin https://example.com
 ```
 
-### Binding handlers
+### Handlers
 
-Use `#[command(context = App)]` to select the same mutable context type passed to the existing parser. Declare function paths on fields and command variants:
-
-```rust
-#[arg(short = 'v', action = "count", on_flag = inc_verbose)]
-verbose: u8,
-
-#[arg(long, on_value_try = set_port)]
-port: Option<u16>,
-
-#[command(handler = run)]
-Run,
-```
-
-Here `inc_verbose` has signature `fn(&mut App)`, `set_port` has signature `fn(&OsStr, &mut App) -> Result<(), E>`, and `run` has signature `fn(&Matches, &mut App)`. The `_try` functions require `E: std::error::Error + Send + Sync + 'static`. Use `handler_try` for fallible command handlers and `on_flag_try` for fallible flags. For positionals, `on_value` and `on_value_try` use the same signatures as value options.
-
-Parse and dispatch with an existing application context:
+Declare methods on the type being derived:
 
 ```rust
-let mut app = App::default();
-let cli = Cli::try_parse_from_with_context(std::env::args_os().skip(1), &mut app)?;
+#[derive(Parser)]
+#[command(handler = Self::run)]
+struct Cli {
+    #[arg(short = 'v', action = "count", on_flag = Self::on_verbose)]
+    verbose: usize,
+}
 ```
 
-With `#[command(context = App)]`, annotate **each** derived `Parser`, `Args`, or `Subcommand` type that directly declares handlers or embeds another context-bound type. Types without a custom context may use the default `()`; handler-free types are reusable across contexts. There are no intermediate command structs to initialize: derive generates `CmdSpec` declarations and decodes the selected typed result.
+- `handler = Self::run` takes `fn(&mut Self)`. It runs only when this command is the selected leaf.
+- `on_flag = Self::on_verbose` takes `fn(&mut Self)` and runs once per flag occurrence.
+- `on_value = Self::on_value` takes `fn(&mut Self, &OsStr)` and runs once per recorded value.
+- The `handler_try`, `on_flag_try`, and `on_value_try` forms return `Result<(), E>`, where `E: Error + Send + Sync + 'static`. Their errors are returned as `Error::UserAny`.
+- A subcommand variant's handler receives `&mut` its **enum** (the type with `#[derive(Subcommand)]`), not the parent `Cli`.
+- `#[arg(skip)]` initializes a non-CLI field using `Default::default()`; `#[arg(skip = expression)]` initializes it from the supplied expression.
 
-Typed decoding is checked **before** dispatch, so an invalid `FromStr` value, missing required field, or count overflow cannot trigger callbacks. Explicit validators still run first. Callback execution uses the same core engine and ordering as the builder API.
+Run `Cli::try_parse()`, `Cli::try_parse_from(args)`, or
+`Cli::try_parse_from_with_env(&env, args)`; the argument iterator excludes the
+executable name. All typed conversion and validation is finished before event
+callbacks run. Argument events run root-to-leaf, options before positionals in
+each scope, in specification order rather than token order. A callback failure
+stops execution; previous callback mutations are not rolled back.
 
-If you do not need handlers, plain `Cli::try_parse()` or `Cli::try_parse_from(args)` works; those methods create a default context. When an application context does not implement `Default`, use `try_parse_from_with_context` instead. `try_parse_from_with_context_and_env(&env, args, &mut app)` accepts custom help/version settings.
+### Attributes
 
-### Supported attributes
+`Parser` and `Args` derive on named structs; `Subcommand` derives on enums with
+unit, named-field, or single-`Args` tuple variants. Generic derived types are
+not supported.
 
-`#[derive(Parser)]` declares the root struct, `#[derive(Args)]` reusable named-field arguments, and `#[derive(Subcommand)]` enum commands. Subcommand variants may be unit, named-field, or a tuple containing one `Args` type.
+- Commands: `name`, `help`, `alias` (variants), `handler`/`handler_try`, `validate`/`validate_try`, `group(name = "...", mode = "xor")` or `mode = "req_one"`.
+- Arguments: `short`, `long`, `name`, `value_name`, `help`, `positional`, `required`, `env`, `default_value`, `group`, `action = "count"`, `min`/`max` for bounded positional `Vec<T>`, `value_parser`/`value_parser_try`, event handlers, `skip`.
+- Composition: `#[command(flatten)]` for `Args`; `#[command(subcommand)]` for `Subcommand` or `Option<Subcommand>`.
 
-- `#[command(name = "...", help = "...", alias = "...")]`; `alias` applies to enum variants.
-- `#[command(context = App)]`, `#[command(handler = run)]` / `#[command(handler_try = run_try)]`, and `#[command(validate = check)]` / `#[command(validate_try = check_try)]`. Each pair is mutually exclusive.
-- `#[command(group(name = "output", mode = "xor"))]` or `mode = "req_one"`.
-- `#[arg(short, long, name = "...", value_name = "...", help = "...")]`; fields without `short`/`long` default to `--kebab-case`.
-- `#[arg(positional, required, min = 1, max = 3)]` — `min`/`max` require `Vec<T>` and both must be given.
-- `#[arg(action = "count")]` on an integer, `bool` flags, `Option<T>` optional values, and `Vec<T>` repeated values/positionals.
-- `#[arg(env = "VAR", default_value = "text", group = "output")]`; defaults are literal strings.
-- `#[arg(value_parser = check)]` / `value_parser_try`; `on_flag` / `on_flag_try` for flags, `on_value` / `on_value_try` for values and positionals. Use one form from each pair.
-- `#[command(flatten)]` embeds `Args` in the current scope; `#[command(subcommand)]` selects `Subcommand` or `Option<Subcommand>`.
+Boolean fields are flags, `Vec<T>` collects repeated values, `Option<T>` is
+optional, and other values use strict UTF-8 `FromStr` conversion. `OsString`
+and `PathBuf` preserve non-UTF-8 values. Argument help is taken from Rust doc
+comments if no explicit `help` is provided.
 
-Field values use strict UTF-8 `FromStr` conversion. `OsString` and `PathBuf` retain native OS values. `Matches`, scoped views, source provenance, help/version errors, aliases, and existing validators retain the core parser's behavior.
-
-**Current limitations:** named structs without generics, no flatten collision detection, no inherited global options, and no clap-style value enum support. Flattened `Args` should not install a competing command handler for the same command. The derive feature does not change the manual callback API.
+`Cli::command()` returns a plain `CmdSpec<()>` for inspection, help rendering,
+or parsing through the core API. The `Parser` entrypoints run typed handlers and reject ambiguous duplicate option, positional, group, and subcommand names.
 
 ## Features
 

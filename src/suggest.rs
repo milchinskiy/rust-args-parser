@@ -1,6 +1,6 @@
 #[must_use]
 pub fn levenshtein(a: &str, b: &str) -> usize {
-    let (n, m) = (a.len(), b.len());
+    let (n, m) = (a.chars().count(), b.chars().count());
     if n == 0 {
         return m;
     }

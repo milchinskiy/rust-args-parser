@@ -294,7 +294,7 @@ fn build_spec<'a>() -> rapp::CmdSpec<'a, GitCtx> {
                 })
                 .validator(|m| {
                     // Example policy: require at least one -m (like scripting UX)
-                    if !m.view().values("message").map_or(false, |v| !v.is_empty()) {
+                    if !matches!(m.view().values("message"), Some(v) if !v.is_empty()) {
                         return Err("commit requires at least one -m MSG in this demo");
                     }
                     Ok(())

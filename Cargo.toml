@@ -1,8 +1,8 @@
 [package]
 name = "rust-args-parser"
-version = "2.1.0"
+version = "3.0.0"
 description = "Tiny, fast, callback-based CLI argument parser for Rust"
-rust-version = "1.60"
+rust-version = "1.74"
 edition = "2021"
 homepage = "https://github.com/milchinskiy/rust-args-parser"
 repository = "https://github.com/milchinskiy/rust-args-parser"
@@ -35,11 +35,7 @@ color = []
 derive = ["dep:rust-args-parser-derive"] # Derive macros and typed event bindings
 
 [dependencies]
-rust-args-parser-derive = { path = "derive", version = "0.1.0", optional = true }
-
-[dev-dependencies]
-pretty_assertions = "1"
-proptest = "1"
+rust-args-parser-derive = { path = "derive", version = "0.2.0", optional = true }
 
 [[example]]
 name = "derive_basic"

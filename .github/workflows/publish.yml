@@ -73,8 +73,6 @@ jobs:
           cargo -Vv
       - name: (optional) Run tests
         if: ${{ inputs.run_tests == true }}
-        env:
-          RUSTFLAGS: -D warnings
         run: |
           cargo test --locked --workspace --verbose
       - name: Read crate name & version

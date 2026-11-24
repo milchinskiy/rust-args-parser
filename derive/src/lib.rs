@@ -40,7 +40,6 @@ struct CommandMeta {
     validate_try: Option<Path>,
     handler: Option<Path>,
     handler_try: Option<Path>,
-    context: Option<Type>,
 }
 
 #[derive(Default)]
@@ -62,6 +61,7 @@ struct FieldMeta {
     validator_try: Option<Path>,
     subcommand: bool,
     flatten: bool,
+    skip: Option<Option<syn::Expr>>,
     on_flag: Option<Path>,
     on_flag_try: Option<Path>,
     on_value: Option<Path>,
@@ -109,8 +109,6 @@ fn command_meta(attrs: &[Attribute]) -> syn::Result<CommandMeta> {
                 out.handler = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("handler_try") {
                 out.handler_try = Some(meta.value()?.parse()?);
-            } else if meta.path.is_ident("context") {
-                out.context = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("group") {
                 let mut group = Group::default();
                 meta.parse_nested_meta(|nested| {
@@ -187,6 +185,8 @@ fn field_meta(field: &Field) -> syn::Result<FieldMeta> {
                 out.subcommand = true;
             } else if meta.path.is_ident("flatten") {
                 out.flatten = true;
+            } else if meta.path.is_ident("skip") {
+                out.skip = Some(if meta.input.peek(syn::Token![=]) { Some(meta.value()?.parse()?) } else { None });
             } else if meta.path.is_ident("on_flag") {
                 out.on_flag = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("on_flag_try") {
@@ -276,14 +276,62 @@ fn decode_value(ty: &Type, value: Tokens, name: &LitStr) -> Tokens {
     }
 }
 
+#[derive(Default)]
 struct FieldPlan {
     augment: Vec<Tokens>,
     init: Vec<Tokens>,
     needs_view: bool,
+    option_events: Vec<Tokens>,
+    positional_events: Vec<Tokens>,
+    child_events: Vec<Tokens>,
+    child_handlers: Vec<Tokens>,
 }
 
-fn plan_fields(fields: &FieldsNamed, ctx_ty: &Tokens) -> syn::Result<FieldPlan> {
-    let mut plan = FieldPlan { augment: vec![], init: vec![], needs_view: false };
+/// Build a call to a nested field. For named enum variants the field is
+/// accessed only after confirming the active variant, without borrowing the
+/// enum while its own event callbacks run.
+fn nested_call(field: &Ident, variant: Option<&Ident>, method: &Ident, optional: bool, single: bool) -> Tokens {
+    let call = if optional {
+        quote! {
+            if let Some(child) = child.as_mut() {
+                ::rust_args_parser::Subcommand::#method(child, m, path)?;
+            }
+        }
+    } else {
+        quote! { ::rust_args_parser::Subcommand::#method(child, m, path)?; }
+    };
+    if let Some(variant) = variant {
+        if single {
+            quote! { let Self::#variant { #field: child, .. } = self; #call }
+        } else {
+            quote! { if let Self::#variant { #field: child, .. } = self { #call } }
+        }
+    } else {
+        quote! { let child = &mut self.#field; #call }
+    }
+}
+
+fn flatten_call(field: &Ident, variant: Option<&Ident>, method: &Ident, single: bool) -> Tokens {
+    if let Some(variant) = variant {
+        if single {
+            quote! {
+                let Self::#variant { #field: child, .. } = self;
+                ::rust_args_parser::Args::#method(child, m, path)?;
+            }
+        } else {
+            quote! {
+                if let Self::#variant { #field: child, .. } = self {
+                    ::rust_args_parser::Args::#method(child, m, path)?;
+                }
+            }
+        }
+    } else {
+        quote! { ::rust_args_parser::Args::#method(&mut self.#field, m, path)?; }
+    }
+}
+
+fn plan_fields(fields: &FieldsNamed, variant: Option<&Ident>, single_variant: bool) -> syn::Result<FieldPlan> {
+    let mut plan = FieldPlan::default();
     for field in &fields.named {
         let ident = field.ident.as_ref().ok_or_else(|| syn::Error::new_spanned(field, "expected named field"))?;
         let attr = field_meta(field)?;
@@ -292,6 +340,37 @@ fn plan_fields(fields: &FieldsNamed, ctx_ty: &Tokens) -> syn::Result<FieldPlan> 
         let opt_ty = inner(&field.ty, "Option");
         let vec_ty = inner(&field.ty, "Vec");
         let elem_ty = opt_ty.as_ref().or(vec_ty.as_ref()).unwrap_or(&field.ty);
+
+        if let Some(value) = &attr.skip {
+            if attr.subcommand
+                || attr.flatten
+                || attr.positional
+                || attr.long.is_some()
+                || attr.short.is_some()
+                || attr.name.is_some()
+                || attr.value_name.is_some()
+                || attr.help.is_some()
+                || attr.env.is_some()
+                || attr.default_value.is_some()
+                || attr.group.is_some()
+                || attr.required.is_some()
+                || attr.min.is_some()
+                || attr.max.is_some()
+                || attr.action.is_some()
+                || attr.validator.is_some()
+                || attr.validator_try.is_some()
+                || attr.on_flag.is_some()
+                || attr.on_flag_try.is_some()
+                || attr.on_value.is_some()
+                || attr.on_value_try.is_some()
+            {
+                return Err(syn::Error::new_spanned(field, "skip cannot be combined with other argument attributes"));
+            }
+            let expr =
+                value.as_ref().map_or_else(|| quote! { ::std::default::Default::default() }, |expr| quote! { #expr });
+            plan.init.push(quote! { #ident: #expr });
+            continue;
+        }
 
         if attr.subcommand || attr.flatten {
             if attr.subcommand && attr.flatten {
@@ -321,18 +400,37 @@ fn plan_fields(fields: &FieldsNamed, ctx_ty: &Tokens) -> syn::Result<FieldPlan> 
             }
             if attr.subcommand {
                 let sub_ty = opt_ty.as_ref().unwrap_or(&field.ty);
-                plan.augment.push(quote! { let cmd = <#sub_ty as ::rust_args_parser::Subcommand<#ctx_ty>>::augment_subcommands(cmd); });
-                let extract = quote! { <#sub_ty as ::rust_args_parser::Subcommand<#ctx_ty>>::from_matches(m, path)? };
+                plan.augment
+                    .push(quote! { let cmd = <#sub_ty as ::rust_args_parser::Subcommand>::augment_subcommands(cmd); });
+                let extract = quote! { <#sub_ty as ::rust_args_parser::Subcommand>::from_matches(m, path)? };
                 let init = if opt_ty.is_some() {
                     extract
                 } else {
                     quote! { #extract.ok_or_else(|| ::rust_args_parser::Error::User("missing required subcommand".into()))? }
                 };
                 plan.init.push(quote! { #ident: #init });
+                let event_method = Ident::new("dispatch_events", proc_macro2::Span::call_site());
+                let handler_method = Ident::new("dispatch_handler", proc_macro2::Span::call_site());
+                plan.child_events.push(nested_call(ident, variant, &event_method, opt_ty.is_some(), single_variant));
+                plan.child_handlers.push(nested_call(
+                    ident,
+                    variant,
+                    &handler_method,
+                    opt_ty.is_some(),
+                    single_variant,
+                ));
             } else {
                 let ty = &field.ty;
-                plan.augment.push(quote! { let cmd = <#ty as ::rust_args_parser::Args<#ctx_ty>>::augment(cmd); });
-                plan.init.push(quote! { #ident: <#ty as ::rust_args_parser::Args<#ctx_ty>>::from_matches(m, path)? });
+                plan.augment.push(quote! { let cmd = <#ty as ::rust_args_parser::Args>::augment(cmd); });
+                plan.init.push(quote! { #ident: <#ty as ::rust_args_parser::Args>::from_matches(m, path)? });
+                let options = Ident::new("dispatch_options", proc_macro2::Span::call_site());
+                let positionals = Ident::new("dispatch_positionals", proc_macro2::Span::call_site());
+                let children = Ident::new("dispatch_children", proc_macro2::Span::call_site());
+                let handler = Ident::new("dispatch_handler", proc_macro2::Span::call_site());
+                plan.option_events.push(flatten_call(ident, variant, &options, single_variant));
+                plan.positional_events.push(flatten_call(ident, variant, &positionals, single_variant));
+                plan.child_events.push(flatten_call(ident, variant, &children, single_variant));
+                plan.child_handlers.push(flatten_call(ident, variant, &handler, single_variant));
             }
             continue;
         }
@@ -415,13 +513,7 @@ fn plan_fields(fields: &FieldsNamed, ctx_ty: &Tokens) -> syn::Result<FieldPlan> 
         let doc = attr.help.clone().or_else(|| doc_text(&field.attrs));
         let mut builder: Tokens;
         if attr.positional {
-            builder = if let Some(on) = &attr.on_value_try {
-                quote! { ::rust_args_parser::PosSpec::new_try(#pos_name, #on) }
-            } else if let Some(on) = &attr.on_value {
-                quote! { ::rust_args_parser::PosSpec::new(#pos_name, #on) }
-            } else {
-                quote! { ::rust_args_parser::PosSpec::new(#pos_name, |_, _: &mut _| {}) }
-            };
+            builder = quote! { ::rust_args_parser::PosSpec::new(#pos_name, |_, _: &mut ()| {}) };
             if let (Some(min), Some(max)) = (attr.min, attr.max) {
                 builder = quote! { #builder.range(#min, #max) };
             } else if vec_ty.is_some() {
@@ -431,19 +523,9 @@ fn plan_fields(fields: &FieldsNamed, ctx_ty: &Tokens) -> syn::Result<FieldPlan> 
             }
         } else {
             builder = if is_flag {
-                if let Some(on) = &attr.on_flag_try {
-                    quote! { ::rust_args_parser::OptSpec::flag_try(#key, #on) }
-                } else if let Some(on) = &attr.on_flag {
-                    quote! { ::rust_args_parser::OptSpec::flag(#key, #on) }
-                } else {
-                    quote! { ::rust_args_parser::OptSpec::flag(#key, |_: &mut _| {}) }
-                }
-            } else if let Some(on) = &attr.on_value_try {
-                quote! { ::rust_args_parser::OptSpec::value_try(#key, #on) }
-            } else if let Some(on) = &attr.on_value {
-                quote! { ::rust_args_parser::OptSpec::value(#key, #on) }
+                quote! { ::rust_args_parser::OptSpec::flag(#key, |_: &mut ()| {}) }
             } else {
-                quote! { ::rust_args_parser::OptSpec::value(#key, |_, _: &mut _| {}) }
+                quote! { ::rust_args_parser::OptSpec::value(#key, |_, _: &mut ()| {}) }
             };
             let long = match &attr.long {
                 Some(Some(value)) => Some(value.clone()),
@@ -495,6 +577,42 @@ fn plan_fields(fields: &FieldsNamed, ctx_ty: &Tokens) -> syn::Result<FieldPlan> 
         } else {
             quote! { let cmd = cmd.opt(#builder); }
         });
+
+        // A field callback sees the final typed container and the raw recorded
+        // value. Flag callbacks repeat per occurrence, even for environment flags.
+        if is_flag {
+            if let Some(on) = attr.on_flag.as_ref().or(attr.on_flag_try.as_ref()) {
+                let call = if attr.on_flag_try.is_some() {
+                    quote! { #on(self).map_err(::rust_args_parser::Error::user)?; }
+                } else {
+                    quote! { #on(self); }
+                };
+                plan.option_events.push(quote! {
+                    for _ in 0..m.at(path).flag_count(#key) { #call }
+                });
+            }
+        } else if let Some(on) = attr.on_value.as_ref().or(attr.on_value_try.as_ref()) {
+            let call = if attr.on_value_try.is_some() {
+                quote! { #on(self, value).map_err(::rust_args_parser::Error::user)?; }
+            } else {
+                quote! { #on(self, value); }
+            };
+            let values = if attr.positional {
+                quote! { m.at(path).pos_many(#pos_name) }
+            } else {
+                quote! { m.at(path).values(#key) }
+            };
+            let body = quote! {
+                if let Some(values) = #values {
+                    for value in values { #call }
+                }
+            };
+            if attr.positional {
+                plan.positional_events.push(body);
+            } else {
+                plan.option_events.push(body);
+            }
+        }
 
         let init = if is_count {
             let ty = &field.ty;
@@ -570,11 +688,13 @@ fn plan_fields(fields: &FieldsNamed, ctx_ty: &Tokens) -> syn::Result<FieldPlan> 
     Ok(plan)
 }
 
-fn commands(cmd: &CommandMeta, attrs: &[Attribute], plan: &FieldPlan) -> syn::Result<Tokens> {
+fn commands(cmd: &CommandMeta, attrs: &[Attribute], plan: &FieldPlan, allow_help: bool) -> syn::Result<Tokens> {
     // Outer command metadata wins over help text from flattened Args.
     let mut steps = plan.augment.clone();
-    if let Some(help) = cmd.help.clone().or_else(|| doc_text(attrs)) {
-        steps.push(quote! { let cmd = cmd.help(#help); });
+    if allow_help {
+        if let Some(help) = cmd.help.clone().or_else(|| doc_text(attrs)) {
+            steps.push(quote! { let cmd = cmd.help(#help); });
+        }
     }
     for group in &cmd.groups {
         let name = group.name.as_ref().expect("checked group name");
@@ -593,12 +713,6 @@ fn commands(cmd: &CommandMeta, attrs: &[Attribute], plan: &FieldPlan) -> syn::Re
     if let Some(path) = &cmd.validate_try {
         steps.push(quote! { let cmd = cmd.validator_try(#path); });
     }
-    if let Some(path) = &cmd.handler {
-        steps.push(quote! { let cmd = cmd.handler(#path); });
-    }
-    if let Some(path) = &cmd.handler_try {
-        steps.push(quote! { let cmd = cmd.handler_try(#path); });
-    }
     Ok(quote! { #(#steps)* cmd })
 }
 
@@ -612,21 +726,9 @@ fn named(input: &DeriveInput) -> syn::Result<&FieldsNamed> {
     }
 }
 
-/// A handler-bearing container is bound to its declared callback context.
-/// Containers without handlers remain generic and can be reused in any context.
-fn context_impl(declared: Option<&Type>, has_hooks: bool) -> (Tokens, Tokens) {
-    if let Some(ty) = declared {
-        (quote! {}, quote! { #ty })
-    } else if has_hooks {
-        (quote! {}, quote! { () })
-    } else {
-        (quote! { <__RappCtx: ?Sized> }, quote! { __RappCtx })
-    }
-}
-
 fn expand(input: DeriveInput, is_parser: bool, is_sub: bool) -> syn::Result<Tokens> {
     if !input.generics.params.is_empty() || input.generics.where_clause.is_some() {
-        return Err(syn::Error::new_spanned(&input.generics, "generic derived types are not yet supported"));
+        return Err(syn::Error::new_spanned(&input.generics, "generic derived types are not supported"));
     }
     let ident = &input.ident;
     if is_sub {
@@ -634,25 +736,42 @@ fn expand(input: DeriveInput, is_parser: bool, is_sub: bool) -> syn::Result<Toke
     }
     let fields = named(&input)?;
     let cmd = command_meta(&input.attrs)?;
-    let field_hooks = fields.named.iter().try_fold(false, |found, field| {
-        let a = field_meta(field)?;
-        Ok::<bool, syn::Error>(
-            found || a.on_flag.is_some() || a.on_flag_try.is_some() || a.on_value.is_some() || a.on_value_try.is_some(),
-        )
-    })?;
-    let (impl_generics, ctx_ty) =
-        context_impl(cmd.context.as_ref(), field_hooks || cmd.handler.is_some() || cmd.handler_try.is_some());
-    let plan = plan_fields(fields, &ctx_ty)?;
-    let spec_steps = commands(&cmd, &input.attrs, &plan)?;
+    if !is_parser
+        && (cmd.handler.is_some()
+            || cmd.handler_try.is_some()
+            || cmd.name.is_some()
+            || cmd.help.is_some()
+            || cmd.validate.is_some()
+            || cmd.validate_try.is_some()
+            || !cmd.aliases.is_empty())
+    {
+        return Err(syn::Error::new_spanned(&input.ident, "Args may declare argument groups, not command metadata"));
+    }
+    if is_parser && !cmd.aliases.is_empty() {
+        return Err(syn::Error::new_spanned(&input.ident, "command aliases belong on subcommand variants"));
+    }
+    let plan = plan_fields(fields, None, false)?;
+    let spec_steps = commands(&cmd, &input.attrs, &plan, is_parser)?;
     let values = &plan.init;
+    let options = &plan.option_events;
+    let positionals = &plan.positional_events;
+    let children = &plan.child_events;
+    let handlers = &plan.child_handlers;
     let view_decl = if plan.needs_view {
         quote! { let view = m.at(path); }
     } else {
         quote! {}
     };
+    let command_handler = if let Some(handler) = &cmd.handler {
+        quote! { #handler(self); }
+    } else if let Some(handler) = &cmd.handler_try {
+        quote! { #handler(self).map_err(::rust_args_parser::Error::user)?; }
+    } else {
+        quote! {}
+    };
     let args_impl = quote! {
-        impl #impl_generics ::rust_args_parser::Args<#ctx_ty> for #ident {
-            fn augment(cmd: ::rust_args_parser::CmdSpec<'static, #ctx_ty>) -> ::rust_args_parser::CmdSpec<'static, #ctx_ty> {
+        impl ::rust_args_parser::Args for #ident {
+            fn augment(cmd: ::rust_args_parser::CmdSpec<'static, ()>) -> ::rust_args_parser::CmdSpec<'static, ()> {
                 #spec_steps
             }
             fn from_matches(m: &::rust_args_parser::Matches, path: &[&str]) -> ::rust_args_parser::Result<Self> {
@@ -660,22 +779,47 @@ fn expand(input: DeriveInput, is_parser: bool, is_sub: bool) -> syn::Result<Toke
                 #view_decl
                 Ok(Self { #(#values),* })
             }
+            fn dispatch_options(&mut self, m: &::rust_args_parser::Matches, path: &[&str]) -> ::rust_args_parser::Result<()> {
+                let _ = (m, path);
+                #(#options)*
+                Ok(())
+            }
+            fn dispatch_positionals(&mut self, m: &::rust_args_parser::Matches, path: &[&str]) -> ::rust_args_parser::Result<()> {
+                let _ = (m, path);
+                #(#positionals)*
+                Ok(())
+            }
+            fn dispatch_children(&mut self, m: &::rust_args_parser::Matches, path: &[&str]) -> ::rust_args_parser::Result<()> {
+                let _ = (m, path);
+                #(#children)*
+                Ok(())
+            }
+            fn dispatch_handler(&mut self, m: &::rust_args_parser::Matches, path: &[&str]) -> ::rust_args_parser::Result<()> {
+                if m.leaf_path().len() == path.len() {
+                    #command_handler
+                } else {
+                    #(#handlers)*
+                }
+                Ok(())
+            }
         }
     };
     if !is_parser {
         return Ok(args_impl);
     }
     let cmd_name = cmd.name.unwrap_or_else(|| literal(&kebab(&ident.to_string())));
-    let parser_ctx = cmd.context.map_or_else(|| quote! { () }, |ty| quote! { #ty });
     Ok(quote! {
         #args_impl
         impl ::rust_args_parser::Parser for #ident {
-            type Context = #parser_ctx;
-            fn command() -> ::rust_args_parser::CmdSpec<'static, Self::Context> {
-                <Self as ::rust_args_parser::Args<Self::Context>>::augment(::rust_args_parser::CmdSpec::new(#cmd_name))
+            fn command() -> ::rust_args_parser::CmdSpec<'static, ()> {
+                <Self as ::rust_args_parser::Args>::augment(::rust_args_parser::CmdSpec::new(#cmd_name))
             }
             fn from_matches(m: &::rust_args_parser::Matches) -> ::rust_args_parser::Result<Self> {
-                <Self as ::rust_args_parser::Args<Self::Context>>::from_matches(m, &[])
+                <Self as ::rust_args_parser::Args>::from_matches(m, &[])
+            }
+            fn dispatch(&mut self, m: &::rust_args_parser::Matches) -> ::rust_args_parser::Result<()> {
+                <Self as ::rust_args_parser::Args>::dispatch_events(self, m, &[])?;
+                <Self as ::rust_args_parser::Args>::dispatch_handler(self, m, &[])
             }
         }
     })
@@ -685,57 +829,104 @@ fn expand_enum(input: &DeriveInput, ident: &Ident) -> syn::Result<Tokens> {
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(input, "Subcommand derive requires an enum"));
     };
+    if data.variants.is_empty() {
+        return Err(syn::Error::new_spanned(ident, "Subcommand requires at least one variant"));
+    }
+    let enum_meta = command_meta(&input.attrs)?;
+    if enum_meta.handler.is_some()
+        || enum_meta.handler_try.is_some()
+        || enum_meta.validate.is_some()
+        || enum_meta.validate_try.is_some()
+        || !enum_meta.groups.is_empty()
+        || enum_meta.name.is_some()
+        || enum_meta.help.is_some()
+        || !enum_meta.aliases.is_empty()
+    {
+        return Err(syn::Error::new_spanned(ident, "command attributes belong on subcommand variants"));
+    }
     let mut make = Vec::new();
     let mut arms = Vec::new();
-    let enum_meta = command_meta(&input.attrs)?;
-    let mut has_hooks = false;
-    for variant in &data.variants {
-        let meta = command_meta(&variant.attrs)?;
-        has_hooks |= meta.handler.is_some() || meta.handler_try.is_some();
-        if let Fields::Named(named) = &variant.fields {
-            for field in &named.named {
-                let a = field_meta(field)?;
-                has_hooks |=
-                    a.on_flag.is_some() || a.on_flag_try.is_some() || a.on_value.is_some() || a.on_value_try.is_some();
-            }
-        }
-    }
-    let (impl_generics, ctx_ty) = context_impl(enum_meta.context.as_ref(), has_hooks);
+    let mut events = Vec::new();
+    let mut handlers = Vec::new();
     for variant in &data.variants {
         let variant_ident = &variant.ident;
         let meta = command_meta(&variant.attrs)?;
         let cmd_name = meta.name.clone().unwrap_or_else(|| literal(&kebab(&variant_ident.to_string())));
         let aliases = &meta.aliases;
-        let (steps, value, needs_view, needs_path) = match &variant.fields {
+        let (steps, value, needs_view, needs_path, event_body, handler_children) = match &variant.fields {
             Fields::Unit => {
-                let plan = FieldPlan { augment: vec![], init: vec![], needs_view: false };
-                (commands(&meta, &variant.attrs, &plan)?, quote! { Self::#variant_ident }, false, false)
+                let plan = FieldPlan::default();
+                (
+                    commands(&meta, &variant.attrs, &plan, true)?,
+                    quote! { Self::#variant_ident },
+                    false,
+                    false,
+                    quote! {},
+                    quote! {},
+                )
             }
             Fields::Named(named) => {
-                let plan = plan_fields(named, &ctx_ty)?;
-                let steps = commands(&meta, &variant.attrs, &plan)?;
+                let plan = plan_fields(named, Some(variant_ident), data.variants.len() == 1)?;
+                let steps = commands(&meta, &variant.attrs, &plan, true)?;
                 let values = &plan.init;
-                (steps, quote! { Self::#variant_ident { #(#values),* } }, plan.needs_view, !named.named.is_empty())
+                let options = &plan.option_events;
+                let positionals = &plan.positional_events;
+                let children = &plan.child_events;
+                let child_handlers = &plan.child_handlers;
+                (
+                    steps,
+                    quote! { Self::#variant_ident { #(#values),* } },
+                    plan.needs_view,
+                    !named.named.is_empty(),
+                    quote! { #(#options)* #(#positionals)* #(#children)* },
+                    quote! { #(#child_handlers)* },
+                )
             }
             Fields::Unnamed(tuple) if tuple.unnamed.len() == 1 => {
                 let ty = &tuple.unnamed.first().expect("one field").ty;
                 let plan = FieldPlan {
-                    augment: vec![quote! { let cmd = <#ty as ::rust_args_parser::Args<#ctx_ty>>::augment(cmd); }],
-                    init: vec![],
-                    needs_view: false,
+                    augment: vec![quote! { let cmd = <#ty as ::rust_args_parser::Args>::augment(cmd); }],
+                    ..FieldPlan::default()
+                };
+                let (event_body, handler_body) = if data.variants.len() == 1 {
+                    (
+                        quote! {
+                            let Self::#variant_ident(child) = self;
+                            ::rust_args_parser::Args::dispatch_events(child, m, path)?;
+                        },
+                        quote! {
+                            let Self::#variant_ident(child) = self;
+                            ::rust_args_parser::Args::dispatch_handler(child, m, path)?;
+                        },
+                    )
+                } else {
+                    (
+                        quote! {
+                            if let Self::#variant_ident(child) = self {
+                                ::rust_args_parser::Args::dispatch_events(child, m, path)?;
+                            }
+                        },
+                        quote! {
+                            if let Self::#variant_ident(child) = self {
+                                ::rust_args_parser::Args::dispatch_handler(child, m, path)?;
+                            }
+                        },
+                    )
                 };
                 (
-                    commands(&meta, &variant.attrs, &plan)?,
-                    quote! { Self::#variant_ident(<#ty as ::rust_args_parser::Args<#ctx_ty>>::from_matches(m, path)?) },
+                    commands(&meta, &variant.attrs, &plan, true)?,
+                    quote! { Self::#variant_ident(<#ty as ::rust_args_parser::Args>::from_matches(m, path)?) },
                     false,
                     true,
+                    event_body,
+                    handler_body,
                 )
             }
             _ => {
                 return Err(syn::Error::new_spanned(
                     &variant.fields,
-                    "variants must be unit, named, or one-field tuple of Args",
-                ))
+                    "variants must be unit, named, or a one-field tuple of Args",
+                ));
             }
         };
         make.push(quote! {
@@ -762,10 +953,49 @@ fn expand_enum(input: &DeriveInput, ident: &Ident) -> syn::Result<Tokens> {
                 Ok(Some(#value))
             },
         });
+        let (pattern, guard) = match &variant.fields {
+            Fields::Unit => (quote! { Self::#variant_ident }, quote! { Self::#variant_ident }),
+            Fields::Named(..) => (quote! { Self::#variant_ident { .. } }, quote! { Self::#variant_ident { .. } }),
+            Fields::Unnamed(..) => (quote! { Self::#variant_ident(..) }, quote! { Self::#variant_ident(..) }),
+        };
+        events.push(quote! {
+            #pattern => {
+                let mut path = path.to_vec();
+                path.push(#cmd_name);
+                let path: &[&str] = &path;
+                let _ = path;
+                if m.leaf_path().get(path.len() - 1).copied() != Some(#cmd_name) {
+                    return Err(::rust_args_parser::Error::Parse("selected command variant was changed".into()));
+                }
+                #event_body
+            }
+        });
+        let handler = if let Some(handler) = &meta.handler {
+            quote! { #handler(self); }
+        } else if let Some(handler) = &meta.handler_try {
+            quote! { #handler(self).map_err(::rust_args_parser::Error::user)?; }
+        } else {
+            quote! {}
+        };
+        handlers.push(quote! {
+            #guard => {
+                let mut path = path.to_vec();
+                path.push(#cmd_name);
+                let path: &[&str] = &path;
+                if m.leaf_path().get(path.len() - 1).copied() != Some(#cmd_name) {
+                    return Err(::rust_args_parser::Error::Parse("selected command variant was changed".into()));
+                }
+                if m.leaf_path().len() == path.len() {
+                    #handler
+                } else {
+                    #handler_children
+                }
+            }
+        });
     }
     Ok(quote! {
-        impl #impl_generics ::rust_args_parser::Subcommand<#ctx_ty> for #ident {
-            fn augment_subcommands(cmd: ::rust_args_parser::CmdSpec<'static, #ctx_ty>) -> ::rust_args_parser::CmdSpec<'static, #ctx_ty> {
+        impl ::rust_args_parser::Subcommand for #ident {
+            fn augment_subcommands(cmd: ::rust_args_parser::CmdSpec<'static, ()>) -> ::rust_args_parser::CmdSpec<'static, ()> {
                 #(#make)*
                 cmd
             }
@@ -776,6 +1006,65 @@ fn expand_enum(input: &DeriveInput, ident: &Ident) -> syn::Result<Tokens> {
                     _ => Ok(None),
                 }
             }
+            fn dispatch_events(&mut self, m: &::rust_args_parser::Matches, path: &[&str]) -> ::rust_args_parser::Result<()> {
+                let _ = (m, path);
+                match self { #(#events),* }
+                Ok(())
+            }
+            fn dispatch_handler(&mut self, m: &::rust_args_parser::Matches, path: &[&str]) -> ::rust_args_parser::Result<()> {
+                match self { #(#handlers),* }
+                Ok(())
+            }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn separate_context_is_not_an_attribute() {
+        let input: DeriveInput = syn::parse_quote! {
+            #[command(context = App)]
+            struct Cli { value: bool }
+        };
+        assert!(expand(input, true, false).unwrap_err().to_string().contains("unknown command attribute"));
+    }
+
+    #[test]
+    fn skipped_fields_cannot_be_cli_arguments() {
+        let input: DeriveInput = syn::parse_quote! {
+            struct Cli { #[arg(skip, long)] state: bool }
+        };
+        assert!(expand(input, true, false).unwrap_err().to_string().contains("skip cannot be combined"));
+    }
+
+    #[test]
+    fn command_handler_not_allowed_on_args() {
+        let input: DeriveInput = syn::parse_quote! {
+            #[command(handler = Self::run)]
+            struct Global { value: bool }
+        };
+        assert!(expand(input, false, false).unwrap_err().to_string().contains("Args may declare"));
+    }
+
+    #[test]
+    fn skipped_state_is_initialized_inside_derived_struct() {
+        let input: DeriveInput = syn::parse_quote! {
+            struct Cli { #[arg(skip = vec![1, 2])] state: Vec<u8> }
+        };
+        let expanded = expand(input, true, false).unwrap().to_string();
+        assert!(expanded.contains("state") && expanded.contains("vec"));
+        assert!(expanded.contains("dispatch_events"));
+    }
+
+    #[test]
+    fn old_description_attribute_is_rejected() {
+        let input: DeriveInput = syn::parse_quote! {
+            #[command(about = "description")]
+            struct Cli { enabled: bool }
+        };
+        assert!(expand(input, true, false).unwrap_err().to_string().contains("unknown command attribute"));
+    }
 }

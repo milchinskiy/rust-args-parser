@@ -1,55 +1,57 @@
 //! `cargo run --features derive --example derive_basic -- -vv --jobs 4 input.txt`
-#[allow(dead_code)]
+
 use rust_args_parser::{Parser, Subcommand};
 use std::ffi::{OsStr, OsString};
 
-#[derive(Default)]
-struct App {
-    verbose: usize,
-    last_input: Option<OsString>,
-}
-
-fn verbose(ctx: &mut App) {
-    ctx.verbose += 1;
-}
-fn input(value: &OsStr, ctx: &mut App) {
-    ctx.last_input = Some(value.to_os_string());
-}
-fn run(matches: &rust_args_parser::Matches, ctx: &mut App) {
-    println!("input={:?}, verbosity={}, command={:?}", ctx.last_input, ctx.verbose, matches.leaf_path());
-}
-
 #[derive(Debug, Parser)]
-#[command(name = "demo", help = "Parse files", context = App, handler = run)]
+#[command(name = "demo", help = "Process an input file", handler = Self::run)]
 struct Cli {
-    #[arg(short = 'v', action = "count", on_flag = verbose)]
+    #[arg(short = 'v', action = "count", on_flag = Self::on_verbose, help = "Verbosity level")]
     verbose: usize,
     #[arg(short = 'j', long, default_value = "2", env = "DEMO_JOBS")]
     jobs: u32,
-    #[arg(positional, value_name = "INPUT", on_value = input)]
+    #[arg(positional, value_name = "INPUT", on_value = Self::on_input, help = "input help")]
     input: OsString,
     #[command(subcommand)]
     command: Option<Command>,
+    #[arg(skip)]
+    observed_flags: usize,
+    #[arg(skip)]
+    observed_input: Option<OsString>,
 }
 
-fn show(_: &rust_args_parser::Matches, _: &mut App) {
-    println!("show command");
+impl Cli {
+    fn on_verbose(&mut self) {
+        self.observed_flags += 1;
+    }
+
+    fn on_input(&mut self, value: &OsStr) {
+        self.observed_input = Some(value.to_os_string());
+    }
+
+    fn run(&self) {
+        println!("processing {:?} with {} jobs (verbosity {})", self.input, self.jobs, self.verbose);
+    }
 }
 
 #[derive(Debug, Subcommand)]
-#[command(context = App)]
 enum Command {
-    #[command(help = "Show input details", handler = show)]
+    #[command(help = "Show input information", handler = Self::show)]
     Show,
 }
 
+impl Command {
+    fn show(_: &Self) {
+        println!("show command selected");
+    }
+}
+
 fn main() {
-    let mut app = App::default();
-    match Cli::try_parse_from_with_context(std::env::args_os().skip(1), &mut app) {
+    match Cli::try_parse() {
         Ok(cli) => {
-            println!("parsed: verbose={}, jobs={}, input={:?}", cli.verbose, cli.jobs, cli.input);
-            if matches!(cli.command, Some(Command::Show)) {
-                println!("selected: show");
+            println!("observed {} flags, input {:?}", cli.observed_flags, cli.observed_input);
+            if cli.command.is_some() {
+                println!("subcommand completed (jobs: {})", cli.jobs);
             }
         }
         Err(rust_args_parser::Error::ExitMsg { code, message }) => {
@@ -58,8 +60,8 @@ fn main() {
             }
             std::process::exit(code);
         }
-        Err(e) => {
-            eprintln!("error: {e}");
+        Err(error) => {
+            eprintln!("error: {error}");
             std::process::exit(2);
         }
     }

@@ -3,120 +3,90 @@ use crate::{CmdSpec, Env};
 use core::fmt::Write;
 
 #[cfg(feature = "color")]
-mod ansi {
-    pub const RESET: &str = "\x1b[0m";
-    pub const BOLD: &str = "\x1b[1m";
-    pub const TITLE: &str = "\x1b[4;37m"; // section titles
-    pub const OPT_LABEL: &str = "\x1b[0;94m"; // option labels
-    pub const POS_LABEL: &str = "\x1b[0;93m"; // positional labels
-    pub const METAVAR: &str = "\x1b[0;96m"; // metavars
-    pub const COMMAND: &str = "\x1b[0;95m"; // command names
-    pub const BRIGHT_WHITE: &str = "\x1b[0;97m";
+fn use_color(env: &Env) -> bool {
+    use crate::ColorMode;
+    use std::io::IsTerminal;
+
+    match env.color {
+        ColorMode::Always => true,
+        ColorMode::Never => false,
+        ColorMode::Auto => std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
+    }
 }
 
-#[cfg(feature = "color")]
-fn paint_title(s: &str) -> String {
-    format!("{}{}{}{}:", ansi::BOLD, ansi::TITLE, s, ansi::RESET)
-}
 #[cfg(not(feature = "color"))]
-fn paint_title(s: &str) -> String {
-    s.to_string()
+const fn use_color(_: &Env) -> bool {
+    false
 }
 
-#[cfg(feature = "color")]
-fn paint_section(s: &str) -> String {
-    format!("{}{}{}:", ansi::TITLE, s, ansi::RESET)
-}
-#[cfg(not(feature = "color"))]
-fn paint_section(s: &str) -> String {
-    s.to_string()
-}
-
-#[cfg(feature = "color")]
-fn paint_option(s: &str) -> String {
-    format!("{}{}{}", ansi::OPT_LABEL, s, ansi::RESET)
-}
-#[cfg(not(feature = "color"))]
-fn paint_option(s: &str) -> String {
-    s.to_string()
+fn paint(s: &str, prefix: &str, colored: bool) -> String {
+    if colored {
+        format!("{prefix}{s}\x1b[0m")
+    } else {
+        s.to_owned()
+    }
 }
 
-#[cfg(feature = "color")]
-fn paint_positional(s: &str) -> String {
-    format!("{}{}{}", ansi::POS_LABEL, s, ansi::RESET)
-}
-#[cfg(not(feature = "color"))]
-fn paint_positional(s: &str) -> String {
-    s.to_string()
+fn paint_title(s: &str, colored: bool) -> String {
+    paint(&format!("{s}:"), "\x1b[1m\x1b[4;37m", colored)
 }
 
-#[cfg(feature = "color")]
-fn paint_metavar(s: &str) -> String {
-    format!("{}{}{}", ansi::METAVAR, s, ansi::RESET)
-}
-#[cfg(not(feature = "color"))]
-fn paint_metavar(s: &str) -> String {
-    s.to_string()
+fn paint_section(s: &str, colored: bool) -> String {
+    paint(&format!("{s}:"), "\x1b[4;37m", colored)
 }
 
-#[cfg(feature = "color")]
-fn paint_command(s: &str) -> String {
-    format!("{}{}{}", ansi::COMMAND, s, ansi::RESET)
+fn paint_option(s: &str, colored: bool) -> String {
+    paint(s, "\x1b[0;94m", colored)
 }
-#[cfg(not(feature = "color"))]
-fn paint_command(s: &str) -> String {
-    s.to_string()
+
+fn paint_positional(s: &str, colored: bool) -> String {
+    paint(s, "\x1b[0;93m", colored)
+}
+
+fn paint_metavar(s: &str, colored: bool) -> String {
+    paint(s, "\x1b[0;96m", colored)
+}
+
+fn paint_command(s: &str, colored: bool) -> String {
+    paint(s, "\x1b[0;95m", colored)
+}
+
+fn paint_bin(s: &str, colored: bool) -> String {
+    paint(s, "\x1b[0;97m\x1b[1m", colored)
 }
 
 #[must_use]
 pub fn render_help<Ctx: ?Sized>(env: &Env, cmd: &CmdSpec<'_, Ctx>) -> String {
-    render_help_with_path(env, &[], cmd)
+    render_help_with_path(env, &[cmd.get_name()], cmd)
 }
 
-fn print_usage<Ctx: ?Sized>(out_buf: &mut String, path: &[&str], cmd: &CmdSpec<'_, Ctx>) {
+fn print_usage<Ctx: ?Sized>(out_buf: &mut String, path: &[&str], cmd: &CmdSpec<'_, Ctx>, colored: bool) {
     use crate::spec::PosCardinality;
+
     let mut out = String::new();
     let is_root = path.len() <= 1;
-    let _ = writeln!(out, "{}", paint_title("Usage"));
-    let bin_name = (*path.first().unwrap_or(&"")).to_string();
-    #[cfg(feature = "color")]
-    let _ = write!(out, "  {}{}{}{}", ansi::BRIGHT_WHITE, ansi::BOLD, bin_name, ansi::RESET);
-    #[cfg(not(feature = "color"))]
-    let _ = write!(out, "  {}", bin_name);
+    let _ = writeln!(out, "{}", paint_title("Usage", colored));
+    let bin_name = path.first().copied().unwrap_or_else(|| cmd.get_name());
+    let _ = write!(out, "  {}", paint_bin(bin_name, colored));
     for command in path.iter().skip(1) {
-        let _ = write!(out, " {}", paint_command(command));
+        let _ = write!(out, " {}", paint_command(command, colored));
     }
     if !cmd.get_opts().is_empty() || is_root {
-        #[cfg(feature = "color")]
-        let _ = write!(out, " {}[options]{}", ansi::OPT_LABEL, ansi::RESET);
-        #[cfg(not(feature = "color"))]
-        let _ = write!(out, " [options]");
+        let _ = write!(out, " {}", paint_option("[options]", colored));
     }
     if !cmd.get_subcommands().is_empty() {
-        #[cfg(feature = "color")]
-        let _ = write!(out, " {}<command>{}", ansi::COMMAND, ansi::RESET);
-        #[cfg(not(feature = "color"))]
-        let _ = write!(out, " <command>");
+        let _ = write!(out, " {}", paint_command("<command>", colored));
     }
-    for p in cmd.get_positionals() {
-        let name = p.get_name();
-        let (req, ellip) = match p.get_cardinality() {
-            PosCardinality::One { .. } => (p.is_required(), false),
-            PosCardinality::Many => (p.is_required(), true),
+    for positional in cmd.get_positionals() {
+        let name = positional.get_name();
+        let (required, multiple) = match positional.get_cardinality() {
+            PosCardinality::One { .. } => (positional.is_required(), false),
+            PosCardinality::Many => (positional.is_required(), true),
             PosCardinality::Range { min, max } => (min > 0, max > 1),
         };
-        let token = if ellip { format!("{name}...") } else { name.to_string() };
-        if req {
-            #[cfg(feature = "color")]
-            let _ = write!(out, " {}<{token}>{}", ansi::POS_LABEL, ansi::RESET);
-            #[cfg(not(feature = "color"))]
-            let _ = write!(out, " <{token}>");
-        } else {
-            #[cfg(feature = "color")]
-            let _ = write!(out, " {}[{token}]{}", ansi::POS_LABEL, ansi::RESET);
-            #[cfg(not(feature = "color"))]
-            let _ = write!(out, " [{token}]");
-        }
+        let token = if multiple { format!("{name}...") } else { name.to_owned() };
+        let label = if required { format!("<{token}>") } else { format!("[{token}]") };
+        let _ = write!(out, " {}", paint_positional(&label, colored));
     }
     let _ = writeln!(out_buf, "{out}\n");
 }
@@ -130,7 +100,8 @@ pub fn render_help_with_path<Ctx: ?Sized>(env: &Env, path: &[&str], cmd: &CmdSpe
         let _ = writeln!(out, "{h}\n");
     }
 
-    print_usage(&mut out, path, cmd);
+    let colored = use_color(env);
+    print_usage(&mut out, path, cmd, colored);
     let mut rows: Vec<(Vec<String>, Option<&str>, String)> = Vec::new();
     let is_root = path.len() <= 1;
 
@@ -175,14 +146,14 @@ pub fn render_help_with_path<Ctx: ?Sized>(env: &Env, path: &[&str], cmd: &CmdSpe
     }
 
     if !rows.is_empty() {
-        let _ = writeln!(out, "{}", paint_section("Options"));
+        let _ = writeln!(out, "{}", paint_section("Options", colored));
         let max_raw =
             rows.iter().map(|(opts, pos, _)| opts.join(", ").len() + pos.map_or(0, |s| s.len() + 1)).max().unwrap_or(0);
         let desc_col = 2 + max_raw + 2; // "  " + label + "  "
         for (lab, pos, desc) in rows {
-            let mut painted = lab.into_iter().map(|s| paint_option(&s)).collect::<Vec<String>>().join(", ");
+            let mut painted = lab.into_iter().map(|s| paint_option(&s, colored)).collect::<Vec<String>>().join(", ");
             if let Some(pos) = pos {
-                painted.push_str(format!(" {}", paint_metavar(pos)).as_str());
+                painted.push_str(format!(" {}", paint_metavar(pos, colored)).as_str());
             }
             let raw = strip_ansi_len(&painted);
             let pad = max_raw + (painted.len() - raw);
@@ -192,11 +163,11 @@ pub fn render_help_with_path<Ctx: ?Sized>(env: &Env, path: &[&str], cmd: &CmdSpe
     }
     // Arguments
     if !cmd.get_positionals().is_empty() {
-        let _ = writeln!(out, "\n{}", paint_section("Arguments"));
+        let _ = writeln!(out, "\n{}", paint_section("Arguments", colored));
         let mut prow_labels: Vec<(String, usize, String)> = Vec::new();
         let mut max_raw = 0usize;
         for p in cmd.get_positionals() {
-            let lab = paint_positional(p.get_name());
+            let lab = paint_positional(p.get_name(), colored);
             let raw = strip_ansi_len(&lab);
             max_raw = max_raw.max(raw);
             prow_labels.push((lab, raw, p.get_help().unwrap_or("").to_string()));
@@ -210,14 +181,14 @@ pub fn render_help_with_path<Ctx: ?Sized>(env: &Env, path: &[&str], cmd: &CmdSpe
     }
     // Commands
     if !cmd.get_subcommands().is_empty() {
-        let _ = writeln!(out, "\n{}", paint_section("Commands"));
+        let _ = writeln!(out, "\n{}", paint_section("Commands", colored));
         let mut crow_labels: Vec<(String, usize, String)> = Vec::new();
         let mut max_raw = 0usize;
         for sc in cmd.get_subcommands() {
             let name = sc.get_name();
-            let mut lab = vec![paint_command(name)];
+            let mut lab = vec![paint_command(name, colored)];
             for alias in sc.get_aliases() {
-                lab.push(paint_command(alias));
+                lab.push(paint_command(alias, colored));
             }
             let lab = lab.join(", ");
             let raw = strip_ansi_len(&lab);

@@ -5,6 +5,7 @@ pub use spec::*;
 mod matches;
 pub use matches::*;
 mod parse;
+mod validation;
 pub use parse::*;
 
 #[cfg(feature = "help")]

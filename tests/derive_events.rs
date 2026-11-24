@@ -1,12 +1,19 @@
 #![cfg(feature = "derive")]
 
-use ap::{Args, Parser, Subcommand};
-use rust_args_parser as ap;
+use rust_args_parser::{Args, Parser, Subcommand};
+use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};
 
-#[derive(Debug, Default)]
-struct State {
-    events: Vec<String>,
+thread_local! {
+    static EVENTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn record(s: impl Into<String>) {
+    EVENTS.with(|events| events.borrow_mut().push(s.into()));
+}
+
+fn take_events() -> Vec<String> {
+    EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
 }
 
 #[derive(Debug)]
@@ -18,264 +25,593 @@ impl std::fmt::Display for AppError {
 }
 impl std::error::Error for AppError {}
 
-fn verbose(state: &mut State) {
-    state.events.push("verbose".into());
-}
-fn global_value(value: &OsStr, state: &mut State) {
-    state.events.push(format!("global={}", value.to_string_lossy()));
-}
-fn set_path(value: &OsStr, state: &mut State) {
-    state.events.push(format!("path={}", value.to_string_lossy()));
-}
-fn flag_try(state: &mut State) -> Result<(), AppError> {
-    if state.events.iter().any(|event| event == "flag_try") {
-        return Err(AppError("duplicate flag"));
-    }
-    state.events.push("flag_try".into());
-    Ok(())
-}
-fn value_try(value: &OsStr, state: &mut State) -> Result<(), AppError> {
-    if value == OsStr::new("reject") {
-        Err(AppError("value rejected by callback"))
-    } else {
-        state.events.push(format!("value_try={}", value.to_string_lossy()));
-        Ok(())
-    }
-}
-fn leaf_handler(matches: &ap::Matches, state: &mut State) {
-    assert_eq!(matches.leaf_path(), vec!["sync"]);
-    assert!(matches.view().is_set("dry"));
-    state.events.push("sync_handler".into());
-}
-fn root_handler(matches: &ap::Matches, state: &mut State) {
-    assert!(matches.leaf_path().is_empty());
-    state.events.push("root_handler".into());
-}
-fn failing_handler(_: &ap::Matches, state: &mut State) -> Result<(), AppError> {
-    state.events.push("failing_handler".into());
-    Err(AppError("handler failed"))
+#[derive(Debug, Args)]
+struct Common {
+    #[arg(long, on_value = Self::on_global)]
+    global: Option<String>,
+    #[arg(skip)]
+    seen: Vec<String>,
 }
 
-#[derive(Debug, Args)]
-#[command(context = State)]
-struct Common {
-    #[arg(long, on_value = global_value)]
-    global: Option<String>,
+impl Common {
+    fn on_global(&mut self, value: &OsStr) {
+        self.seen.push(value.to_string_lossy().into_owned());
+        record(format!("global={}", value.to_string_lossy()));
+    }
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "tool", context = State, handler = root_handler)]
+#[command(name = "tool", handler = Self::run)]
 struct Cli {
-    #[arg(short = 'v', action = "count", on_flag = verbose)]
-    verbosity: u8,
+    #[arg(short = 'v', action = "count", on_flag = Self::on_verbose)]
+    verbose: u8,
     #[command(flatten)]
     common: Common,
     #[command(subcommand)]
-    cmd: Option<Command>,
+    command: Option<Command>,
+    #[arg(skip)]
+    called: usize,
+}
+
+impl Cli {
+    fn on_verbose(&mut self) {
+        self.called += 1;
+        record("verbose");
+    }
+    fn run(&mut self) {
+        self.called += 100;
+        record("root_handler");
+    }
 }
 
 #[derive(Debug, Subcommand)]
-#[command(context = State)]
 enum Command {
-    #[command(alias = "s", handler = leaf_handler)]
+    #[command(alias = "s", handler = Self::sync)]
     Sync {
-        #[arg(long, on_flag_try = flag_try)]
+        #[arg(long, on_flag_try = Self::dry)]
         dry: bool,
-        #[arg(long, on_value_try = value_try)]
+        #[arg(long, on_value_try = Self::tag)]
         tag: Vec<String>,
-        #[arg(positional, value_name = "PATH", on_value = set_path)]
+        #[arg(positional, value_name = "PATH", on_value = Self::path)]
         path: OsString,
+        #[arg(skip)]
+        completed: bool,
+        #[arg(skip)]
+        seen: Vec<String>,
     },
-    #[command(handler_try = failing_handler)]
+    #[command(handler_try = Self::fail)]
     Fail,
+    #[command(handler = Self::status)]
+    Status,
+    Remote(Remote),
 }
 
-#[test]
-fn callbacks_execute_in_spec_order_then_leaf_handler() {
-    let mut state = State::default();
-    let cli = Cli::try_parse_from_with_context(
-        ["-vv", "--global", "g", "s", "--dry", "--tag", "a", "--tag=b", "src"],
-        &mut state,
-    )
-    .unwrap();
-    assert_eq!(cli.verbosity, 2);
-    assert_eq!(cli.common.global.as_deref(), Some("g"));
-    match cli.cmd {
-        Some(Command::Sync { dry, tag, path }) => {
-            assert!(dry);
-            assert_eq!(tag, vec!["a", "b"]);
-            assert_eq!(path, OsString::from("src"));
+impl Command {
+    fn dry(&mut self) -> Result<(), AppError> {
+        if let Self::Sync { seen, .. } = self {
+            if seen.iter().any(|event| event == "dry") {
+                return Err(AppError("duplicate dry"));
+            }
+            seen.push("dry".into());
         }
-        _ => panic!("expected sync"),
+        record("dry");
+        Ok(())
     }
-    assert_eq!(
-        state.events.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["verbose", "verbose", "global=g", "flag_try", "value_try=a", "value_try=b", "path=src", "sync_handler",]
-    );
+
+    fn tag(&mut self, value: &OsStr) -> Result<(), AppError> {
+        if value == OsStr::new("reject") {
+            return Err(AppError("tag rejected"));
+        }
+        if let Self::Sync { seen, .. } = self {
+            seen.push(value.to_string_lossy().into_owned());
+        }
+        record(format!("tag={}", value.to_string_lossy()));
+        Ok(())
+    }
+
+    fn path(_: &Self, value: &OsStr) {
+        record(format!("path={}", value.to_string_lossy()));
+    }
+
+    fn sync(&mut self) {
+        if let Self::Sync { dry, tag, path, completed, .. } = self {
+            assert!(*dry);
+            assert_eq!(tag.as_slice(), ["a", "b"]);
+            assert_eq!(path, &OsString::from("src"));
+            *completed = true;
+        }
+        record("sync_handler");
+    }
+
+    fn fail(_: &Self) -> Result<(), AppError> {
+        record("failing_handler");
+        Err(AppError("command failed"))
+    }
+
+    fn status(_: &Self) {
+        record("status_handler");
+    }
+}
+
+#[derive(Debug, Args)]
+struct Remote {
+    #[command(subcommand)]
+    action: RemoteAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum RemoteAction {
+    #[command(handler = Self::add)]
+    Add {
+        #[arg(positional, on_value = Self::on_name)]
+        name: String,
+        #[arg(skip)]
+        invoked: bool,
+    },
+    List,
+}
+
+impl RemoteAction {
+    fn on_name(_: &Self, raw: &OsStr) {
+        record(format!("remote_name={}", raw.to_string_lossy()));
+    }
+    fn add(&mut self) {
+        if let Self::Add { name, invoked } = self {
+            assert_eq!(name, "origin");
+            *invoked = true;
+        }
+        record("remote_add_handler");
+    }
 }
 
 #[test]
-fn root_handler_runs_only_when_no_subcommand_selected() {
-    let mut state = State::default();
-    let cli = Cli::try_parse_from_with_context(["-v"], &mut state).unwrap();
-    assert!(cli.cmd.is_none());
-    assert_eq!(state.events.iter().map(String::as_str).collect::<Vec<_>>(), ["verbose", "root_handler"]);
+fn event_order_and_state_are_owned_by_typed_values() {
+    take_events();
+    let cli = Cli::try_parse_from(["-vv", "--global", "g", "s", "--dry", "--tag", "a", "--tag=b", "src"]).unwrap();
+    assert_eq!(cli.verbose, 2);
+    assert_eq!(cli.called, 2);
+    assert_eq!(cli.common.global.as_deref(), Some("g"));
+    assert_eq!(cli.common.seen, vec!["g"]);
+    match cli.command {
+        Some(Command::Sync { completed, seen, .. }) => {
+            assert!(completed);
+            assert_eq!(seen, vec!["dry", "a", "b"]);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+    assert_eq!(take_events(), ["verbose", "verbose", "global=g", "dry", "tag=a", "tag=b", "path=src", "sync_handler"]);
 }
 
 #[test]
-fn typed_failures_do_not_dispatch_events() {
-    let mut state = State::default();
-    let err = Cli::try_parse_from_with_context(["-v", "sync", "--tag", "a"], &mut state);
-    assert!(matches!(err, Err(ap::Error::User(_))), "missing required positional: {err:?}");
-    assert!(state.events.is_empty());
+fn only_selected_leaf_handler_runs() {
+    take_events();
+    let cli = Cli::try_parse_from(["-v"]).unwrap();
+    assert!(cli.command.is_none());
+    assert_eq!(cli.called, 101);
+    assert_eq!(take_events(), ["verbose", "root_handler"]);
 
-    // count overflow is also detected before callbacks.
-    let flags: Vec<OsString> = std::iter::repeat(OsString::from("-v")).take(256).collect();
-    let err = Cli::try_parse_from_with_context(flags, &mut state);
-    assert!(matches!(err, Err(ap::Error::User(_))));
-    assert!(state.events.is_empty());
+    let cli = Cli::try_parse_from(["status"]).unwrap();
+    assert!(matches!(cli.command, Some(Command::Status)));
+    assert_eq!(cli.called, 0);
+    assert_eq!(take_events(), ["status_handler"]);
+
+    let cli = Cli::try_parse_from(["remote", "add", "origin"]).unwrap();
+    match cli.command {
+        Some(Command::Remote(Remote { action: RemoteAction::Add { invoked, .. } })) => assert!(invoked),
+        other => panic!("unexpected command: {other:?}"),
+    }
+    assert_eq!(take_events(), ["remote_name=origin", "remote_add_handler"]);
 }
 
 #[test]
-fn fallible_value_handler_propagates_original_error_and_skips_leaf() {
-    let mut state = State::default();
-    let err = Cli::try_parse_from_with_context(["sync", "--tag", "reject", "src"], &mut state).unwrap_err();
+fn all_errors_precede_events_and_handlers() {
+    take_events();
+    let err = Cli::try_parse_from(["-v", "sync", "--tag", "a"]).unwrap_err();
+    assert!(matches!(err, rust_args_parser::Error::User(_)));
+    assert_eq!(take_events(), Vec::<String>::new());
+
+    let many = vec![OsString::from("-v"); 256];
+    assert!(matches!(Cli::try_parse_from(many), Err(rust_args_parser::Error::User(_))));
+    assert_eq!(take_events(), Vec::<String>::new());
+
+    let err = Cli::try_parse_from(["-v", "sync", "--no-such-option", "src"]).unwrap_err();
+    assert!(matches!(err, rust_args_parser::Error::UnknownOption { .. }));
+    assert_eq!(take_events(), Vec::<String>::new());
+}
+
+#[test]
+fn fallible_callbacks_stop_dispatch_without_rollback() {
+    take_events();
+    let err = Cli::try_parse_from(["-v", "sync", "--dry", "--dry", "src"]).unwrap_err();
     match err {
-        ap::Error::UserAny(e) => assert_eq!(e.downcast_ref::<AppError>().unwrap().0, "value rejected by callback"),
+        rust_args_parser::Error::UserAny(e) => assert_eq!(e.downcast_ref::<AppError>().unwrap().0, "duplicate dry"),
         other => panic!("unexpected error: {other:?}"),
     }
-    assert!(!state.events.iter().any(|e| e == "sync_handler"));
-}
+    assert_eq!(take_events(), ["verbose", "dry"]);
 
-#[test]
-fn fallible_command_handler_propagates_original_error() {
-    let mut state = State::default();
-    let err = Cli::try_parse_from_with_context(["fail"], &mut state).unwrap_err();
+    let err = Cli::try_parse_from(["sync", "--dry", "--tag", "reject", "src"]).unwrap_err();
     match err {
-        ap::Error::UserAny(e) => assert_eq!(e.downcast_ref::<AppError>().unwrap().0, "handler failed"),
+        rust_args_parser::Error::UserAny(e) => assert_eq!(e.downcast_ref::<AppError>().unwrap().0, "tag rejected"),
         other => panic!("unexpected error: {other:?}"),
     }
-    assert_eq!(state.events.iter().map(String::as_str).collect::<Vec<_>>(), ["failing_handler"]);
+    assert_eq!(take_events(), ["dry"]);
+
+    let err = Cli::try_parse_from(["fail"]).unwrap_err();
+    match err {
+        rust_args_parser::Error::UserAny(e) => assert_eq!(e.downcast_ref::<AppError>().unwrap().0, "command failed"),
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(take_events(), ["failing_handler"]);
 }
 
 #[test]
-fn generated_command_still_works_with_manual_core_parser() {
-    let spec = Cli::command();
-    let mut state = State::default();
-    let matches =
-        ap::parse(&ap::Env::default(), &spec, &["sync".into(), "--dry".into(), "f".into()], &mut state).unwrap();
-    assert_eq!(matches.leaf_path(), vec!["sync"]);
-    assert_eq!(state.events.iter().map(String::as_str).collect::<Vec<_>>(), ["flag_try", "path=f", "sync_handler"]);
-}
-
-#[test]
-fn invalid_field_value_does_not_run_callbacks() {
+fn all_field_conversions_precede_dispatch() {
     #[derive(Debug, Parser)]
-    #[command(context = State)]
-    struct Numeric {
-        #[arg(long, on_value = global_value)]
+    struct Typed {
+        #[arg(long, on_value = Self::on_name)]
+        name: String,
+        #[arg(long)]
         count: u16,
     }
-    let mut state = State::default();
-    let err = Numeric::try_parse_from_with_context(["--count", "not-int"], &mut state);
-    assert!(matches!(err, Err(ap::Error::User(_))));
-    assert!(state.events.is_empty());
-
-    let parsed = Numeric::try_parse_from_with_context(["--count", "42"], &mut state).unwrap();
-    assert_eq!(parsed.count, 42);
-    assert_eq!(state.events, vec!["global=42".to_string()]);
+    impl Typed {
+        fn on_name(_: &Self, _raw: &OsStr) {
+            record("name");
+        }
+    }
+    take_events();
+    let err = Typed::try_parse_from(["--name", "ok", "--count", "bad"]).unwrap_err();
+    assert!(matches!(err, rust_args_parser::Error::User(_)));
+    assert_eq!(take_events(), Vec::<String>::new());
+    let typed = Typed::try_parse_from(["--name", "ok", "--count", "42"]).unwrap();
+    assert_eq!(typed.name, "ok");
+    assert_eq!(typed.count, 42);
+    assert_eq!(take_events(), ["name"]);
 }
 
 #[test]
-fn explicit_value_validator_blocks_events_and_handler() {
-    fn validate(v: &OsStr) -> Result<(), &'static str> {
-        if v == OsStr::new("invalid") {
-            Err("invalid value")
+fn explicit_validator_runs_before_events() {
+    fn validate(value: &OsStr) -> Result<(), &'static str> {
+        if value == OsStr::new("bad") {
+            Err("invalid")
         } else {
             Ok(())
         }
     }
     #[derive(Debug, Parser)]
-    #[command(context = State, handler = root_handler)]
+    #[command(handler = Self::run)]
     struct Validated {
-        #[arg(long, value_parser = validate, on_value = global_value)]
-        name: String,
+        #[arg(long, value_parser = validate, on_value = Self::set)]
+        tag: String,
+        #[arg(skip)]
+        seen: Vec<String>,
     }
-    let mut state = State::default();
-    let err = Validated::try_parse_from_with_context(["--name", "invalid"], &mut state).unwrap_err();
-    assert!(matches!(err, ap::Error::User(_)));
-    assert!(state.events.is_empty());
+    impl Validated {
+        fn set(&mut self, _: &OsStr) {
+            self.seen.push(self.tag.clone());
+            record("tag");
+        }
+        fn run(_: &Self) {
+            record("handler");
+        }
+    }
+    take_events();
+    assert!(matches!(Validated::try_parse_from(["--tag=bad"]), Err(rust_args_parser::Error::User(_))));
+    assert_eq!(take_events(), Vec::<String>::new());
+    let parsed = Validated::try_parse_from(["--tag=good"]).unwrap();
+    assert_eq!(parsed.seen, vec!["good"]);
+    assert_eq!(take_events(), ["tag", "handler"]);
+}
 
-    let parsed = Validated::try_parse_from_with_context(["--name", "valid"], &mut state).unwrap();
-    assert_eq!(parsed.name, "valid");
-    assert_eq!(state.events, vec!["global=valid".to_string(), "root_handler".to_string()]);
+#[test]
+fn no_context_and_explicit_skipped_field_initializer() {
+    #[derive(Debug, Parser)]
+    #[command(handler = Self::run)]
+    struct Simple {
+        #[arg(long)]
+        number: i32,
+        #[arg(skip = 10usize)]
+        result: usize,
+    }
+    impl Simple {
+        fn run(&mut self) {
+            self.result += usize::try_from(self.number).expect("nonnegative input");
+        }
+    }
+    let parsed = Simple::try_parse_from(["--number=2"]).unwrap();
+    assert_eq!(parsed.result, 12);
+}
+
+#[test]
+fn events_follow_specification_order_options_then_positionals() {
+    #[derive(Debug, Args)]
+    struct Shared {
+        #[arg(long, on_value = Self::option)]
+        shared: Option<String>,
+    }
+    impl Shared {
+        fn option(_: &Self, _: &OsStr) {
+            record("shared");
+        }
+    }
+    #[derive(Debug, Parser)]
+    struct Ordering {
+        #[arg(positional, on_value = Self::pos)]
+        file: OsString,
+        #[arg(long, on_flag = Self::flag)]
+        flag: bool,
+        #[command(flatten)]
+        shared: Shared,
+    }
+    impl Ordering {
+        fn pos(_: &Self, _: &OsStr) {
+            record("pos");
+        }
+        fn flag(_: &Self) {
+            record("flag");
+        }
+    }
+    take_events();
+    let result = Ordering::try_parse_from(["--shared", "x", "file", "--flag"]).unwrap();
+    assert!(result.flag);
+    assert_eq!(result.file, OsString::from("file"));
+    assert_eq!(result.shared.shared.as_deref(), Some("x"));
+    assert_eq!(take_events(), ["flag", "shared", "pos"]);
+}
+
+#[test]
+fn overlay_callbacks_see_only_the_effective_source() {
+    #[derive(Debug, Parser)]
+    struct Overlay {
+        #[arg(long, env = "RAP_300_DERIVE_EVENT_SOURCE", default_value = "fallback", on_value = Self::on_tag)]
+        tags: Vec<String>,
+    }
+    impl Overlay {
+        fn on_tag(_: &Self, value: &OsStr) {
+            record(value.to_string_lossy());
+        }
+    }
+    take_events();
+    std::env::set_var("RAP_300_DERIVE_EVENT_SOURCE", "env");
+    let typed = Overlay::try_parse_from(["--tags", "cli1", "--tags=cli2"]).unwrap();
+    assert_eq!(typed.tags, vec!["cli1", "cli2"]);
+    assert_eq!(take_events(), ["cli1", "cli2"]);
+    let typed = Overlay::try_parse_from(Vec::<OsString>::new()).unwrap();
+    assert_eq!(typed.tags, vec!["env"]);
+    assert_eq!(take_events(), ["env"]);
+    std::env::remove_var("RAP_300_DERIVE_EVENT_SOURCE");
+    let typed = Overlay::try_parse_from(Vec::<OsString>::new()).unwrap();
+    assert_eq!(typed.tags, vec!["fallback"]);
+    assert_eq!(take_events(), ["fallback"]);
 }
 
 #[cfg(unix)]
 #[test]
-fn non_utf8_positional_reaches_callback_unchanged() {
-    use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    #[derive(Default)]
+fn non_utf8_callback_and_field_are_byte_preserving() {
+    use std::os::unix::ffi::OsStringExt;
+    #[derive(Debug, Parser)]
     struct Native {
-        bytes: Vec<u8>,
+        #[arg(positional, on_value = Self::set)]
+        input: OsString,
+        #[arg(skip)]
+        seen: OsString,
     }
-    fn set_native(value: &OsStr, state: &mut Native) {
-        state.bytes = value.as_bytes().to_vec();
+    impl Native {
+        fn set(&mut self, value: &OsStr) {
+            self.seen = value.to_os_string();
+        }
     }
-    #[derive(Debug, Parser)]
-    #[command(context = Native)]
-    struct NativeCli {
-        #[arg(positional, on_value = set_native)]
-        file: OsString,
-    }
-    let invalid = OsString::from_vec(vec![0xff, b'a']);
-    let mut state = Native::default();
-    let parsed = NativeCli::try_parse_from_with_context(vec![invalid.clone()], &mut state).unwrap();
-    assert_eq!(parsed.file, invalid);
-    assert_eq!(state.bytes, vec![0xff, b'a']);
+    let raw = OsString::from_vec(vec![0xff, b'a']);
+    let typed = Native::try_parse_from([raw.clone()]).unwrap();
+    assert_eq!(typed.input, raw);
+    assert_eq!(typed.seen, raw);
 }
 
 #[test]
-fn fallible_flag_callback_propagates_typed_error() {
-    fn reject(_: &mut State) -> Result<(), AppError> {
-        Err(AppError("flag rejected"))
-    }
-    #[derive(Debug, Parser)]
-    #[command(context = State, handler = root_handler)]
-    struct Flag {
-        #[arg(long, on_flag_try = reject)]
-        reject: bool,
-    }
-    let mut state = State::default();
-    let err = Flag::try_parse_from_with_context(["--reject"], &mut state).unwrap_err();
-    match err {
-        ap::Error::UserAny(e) => assert_eq!(e.downcast_ref::<AppError>().unwrap().0, "flag rejected"),
-        other => panic!("unexpected error: {other:?}"),
-    }
-    assert!(state.events.is_empty(), "leaf handler must not execute after callback error");
-
-    let parsed = Flag::try_parse_from_with_context(std::iter::empty::<&str>(), &mut state).unwrap();
-    assert!(!parsed.reject);
-    assert_eq!(state.events, vec!["root_handler".to_string()]);
+fn generated_spec_is_usable_with_core_parser() {
+    let spec = Cli::command();
+    let m = rust_args_parser::parse(
+        &rust_args_parser::Env::default(),
+        &spec,
+        &["s".into(), "--dry".into(), "src".into()],
+        &mut (),
+    )
+    .unwrap();
+    assert_eq!(m.leaf_path(), vec!["sync"]);
+    assert!(m.view().is_set("dry"));
 }
 
 #[test]
-fn callbacks_honor_cli_over_environment_and_default() {
-    const ENV_KEY: &str = "RAP_210_EVENT_OVERLAY";
+fn nested_conversion_failure_prevents_parent_callbacks() {
     #[derive(Debug, Parser)]
-    #[command(context = State, handler = root_handler)]
-    struct Overlay {
-        #[arg(long, env = "RAP_210_EVENT_OVERLAY", default_value = "fallback", on_value = global_value)]
-        tag: Vec<String>,
+    struct Parent {
+        #[arg(short = 'v', on_flag = Self::on_verbose)]
+        verbose: bool,
+        #[command(subcommand)]
+        command: Child,
     }
-    std::env::set_var(ENV_KEY, "environment");
-    let mut state = State::default();
-    let parsed = Overlay::try_parse_from_with_context(["--tag=a", "--tag=b"], &mut state).unwrap();
-    assert_eq!(parsed.tag, vec!["a", "b"]);
-    assert_eq!(state.events.iter().map(String::as_str).collect::<Vec<_>>(), ["global=a", "global=b", "root_handler"]);
-    std::env::remove_var(ENV_KEY);
-    let mut state = State::default();
-    let parsed = Overlay::try_parse_from_with_context(Vec::<OsString>::new(), &mut state).unwrap();
-    assert_eq!(parsed.tag, vec!["fallback"]);
-    assert_eq!(state.events.iter().map(String::as_str).collect::<Vec<_>>(), ["global=fallback", "root_handler"]);
+    impl Parent {
+        fn on_verbose(_: &Self) {
+            record("parent flag");
+        }
+    }
+    #[derive(Debug, Subcommand)]
+    enum Child {
+        Run {
+            #[arg(long)]
+            attempts: u32,
+        },
+    }
+    take_events();
+    let err = Parent::try_parse_from(["-v", "run", "--attempts", "not-a-number"]).unwrap_err();
+    assert!(matches!(err, rust_args_parser::Error::User(_)));
+    assert_eq!(take_events(), Vec::<String>::new());
+    let parsed = Parent::try_parse_from(["run", "--attempts=3"]).unwrap();
+    assert!(!parsed.verbose);
+    assert!(matches!(parsed.command, Child::Run { attempts: 3 }));
+}
+
+#[test]
+fn singular_option_callback_sees_last_value_only() {
+    #[derive(Debug, Parser)]
+    struct Last {
+        #[arg(long, on_value = Self::set)]
+        value: String,
+        #[arg(skip)]
+        observed: Vec<String>,
+    }
+    impl Last {
+        fn set(&mut self, raw: &OsStr) {
+            self.observed.push(raw.to_string_lossy().into_owned());
+        }
+    }
+    let value = Last::try_parse_from(["--value=first", "--value=second"]).unwrap();
+    assert_eq!(value.value, "second");
+    assert_eq!(value.observed, ["second"]);
+}
+
+#[test]
+fn flag_count_from_environment_does_not_add_to_cli_count() {
+    #[derive(Debug, Parser)]
+    struct Presence {
+        #[arg(long, env = "RAP_300_DERIVE_FLAG_SOURCE", on_flag = Self::bump)]
+        enabled: bool,
+        #[arg(skip)]
+        seen: usize,
+    }
+    impl Presence {
+        fn bump(&mut self) {
+            self.seen += 1;
+        }
+    }
+    std::env::set_var("RAP_300_DERIVE_FLAG_SOURCE", "false");
+    let parsed = Presence::try_parse_from(Vec::<OsString>::new()).unwrap();
+    assert!(parsed.enabled);
+    assert_eq!(parsed.seen, 1);
+    let parsed = Presence::try_parse_from(["--enabled", "--enabled"]).unwrap();
+    assert!(parsed.enabled);
+    assert_eq!(parsed.seen, 2);
+    std::env::remove_var("RAP_300_DERIVE_FLAG_SOURCE");
+}
+
+#[test]
+fn ambiguous_generated_specs_are_rejected_before_parse() {
+    #[allow(dead_code)]
+    #[derive(Debug, Args)]
+    struct Shared {
+        #[arg(long = "dup")]
+        first: bool,
+    }
+    #[allow(dead_code)]
+    #[derive(Debug, Parser)]
+    struct Collide {
+        #[command(flatten)]
+        shared: Shared,
+        #[arg(long = "dup")]
+        second: bool,
+    }
+    #[allow(dead_code)]
+    #[derive(Debug, Parser)]
+    struct AliasCollision {
+        #[command(subcommand)]
+        command: Aliased,
+    }
+    #[derive(Debug, Subcommand)]
+    enum Aliased {
+        #[command(alias = "name")]
+        First,
+        #[command(name = "name")]
+        Second,
+    }
+    let err = Collide::try_parse_from(Vec::<OsString>::new()).unwrap_err();
+    assert!(matches!(err, rust_args_parser::Error::Parse(s) if s.contains("duplicate long")));
+
+    let err = AliasCollision::try_parse_from(["name"]).unwrap_err();
+    assert!(matches!(err, rust_args_parser::Error::Parse(s) if s.contains("duplicate subcommand")));
+}
+
+#[test]
+fn changed_subcommand_variant_cannot_dispatch_wrong_handler() {
+    #[derive(Debug, Parser)]
+    struct Root {
+        #[arg(long, on_flag = Self::replace_command)]
+        replace: bool,
+        #[command(subcommand)]
+        command: Commands,
+    }
+    impl Root {
+        fn replace_command(&mut self) {
+            self.command = Commands::Other;
+        }
+    }
+    #[derive(Debug, Subcommand)]
+    enum Commands {
+        #[command(handler = Self::run)]
+        Run,
+        #[command(handler = Self::other)]
+        Other,
+    }
+    impl Commands {
+        fn run(_: &Self) {
+            record("run");
+        }
+        fn other(_: &Self) {
+            record("other");
+        }
+    }
+    take_events();
+    let err = Root::try_parse_from(["--replace", "run"]).unwrap_err();
+    assert!(matches!(err, rust_args_parser::Error::Parse(message) if message.contains("changed")));
+    assert_eq!(take_events(), Vec::<String>::new());
+    let parsed = Root::try_parse_from(["run"]).unwrap();
+    assert!(!parsed.replace);
+    assert!(matches!(parsed.command, Commands::Run));
+    assert_eq!(take_events(), ["run"]);
+}
+
+#[test]
+fn single_variant_nested_commands_dispatch_without_irrefutable_patterns() {
+    #[derive(Debug, Parser)]
+    struct RootTuple {
+        #[command(subcommand)]
+        command: Tuple,
+    }
+    #[derive(Debug, Subcommand)]
+    enum Tuple {
+        Wrap(Wrapped),
+    }
+    #[derive(Debug, Args)]
+    struct Wrapped {
+        #[command(subcommand)]
+        action: Action,
+    }
+    #[derive(Debug, Subcommand)]
+    enum Action {
+        #[command(handler = Self::run)]
+        Run,
+    }
+    impl Action {
+        fn run(_: &Self) {
+            record("single tuple");
+        }
+    }
+    #[derive(Debug, Parser)]
+    struct RootNamed {
+        #[command(subcommand)]
+        command: Named,
+    }
+    #[derive(Debug, Subcommand)]
+    enum Named {
+        Wrap {
+            #[command(subcommand)]
+            action: Action,
+        },
+    }
+    take_events();
+    let parsed = RootTuple::try_parse_from(["wrap", "run"]).unwrap();
+    assert!(matches!(parsed.command, Tuple::Wrap(Wrapped { action: Action::Run })));
+    assert_eq!(take_events(), ["single tuple"]);
+
+    let parsed = RootNamed::try_parse_from(["wrap", "run"]).unwrap();
+    assert!(matches!(parsed.command, Named::Wrap { action: Action::Run }));
+    assert_eq!(take_events(), ["single tuple"]);
 }

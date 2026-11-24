@@ -417,6 +417,7 @@ impl<'a, Ctx: ?Sized> PosSpec<'a, Ctx> {
     pub fn is_multiple(&self) -> bool {
         !matches!(self.card, PosCardinality::One { .. })
     }
+    #[must_use = "use the returned callback to process a positional value"]
     pub fn get_on_value(&self) -> &OnValueFn<'a, Ctx> {
         &*self.on_value
     }
@@ -439,7 +440,7 @@ pub struct CmdSpec<'a, Ctx: ?Sized> {
     aliases: Vec<&'a str>,
     opts: Vec<OptSpec<'a, Ctx>>,
     positionals: Vec<PosSpec<'a, Ctx>>,
-    subcommands: Vec<CmdSpec<'a, Ctx>>,
+    subcommands: Vec<Self>,
     groups: Vec<GroupDecl<'a>>,
     validate_cmd: Option<Box<CmdValidatorFn<'a>>>,
     handler: Option<Box<CmdHandlerFn<'a, Ctx>>>, // leaf command handler
@@ -576,6 +577,6 @@ impl<'a, Ctx: ?Sized> CmdSpec<'a, Ctx> {
     }
     #[must_use]
     pub fn find_sub(&self, needle: &str) -> Option<&Self> {
-        self.subcommands.iter().find(|c| c.name == needle || c.aliases.iter().any(|a| *a == needle))
+        self.subcommands.iter().find(|c| c.name == needle || c.aliases.contains(&needle))
     }
 }

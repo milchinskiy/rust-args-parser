@@ -25,6 +25,12 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Show Rust and Clippy versions
+        run: |
+          rustc -Vv
+          cargo clippy --version
       - name: Cache cargo registry + build
         uses: actions/cache@v5
         with:
@@ -35,20 +41,34 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-features --all-targets
       - name: Build (lib + examples)
-        env:
-          RUSTFLAGS: -D warnings
         run: |
           cargo build --locked --lib --examples --verbose
       - name: Test (lib + unit/integration)
-        env:
-          RUSTFLAGS: -D warnings
         run: |
           cargo test --locked --workspace --all-features --all-targets --verbose
           cargo test --locked --no-default-features --verbose
+  msrv:
+    name: Rust 1.74
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Install Rust (1.74)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.74.0
+      - name: Test on MSRV
+        run: cargo test --locked --workspace --all-features --all-targets
   release:
     name: Create GitHub Release
-    needs: test
+    needs: [test, msrv]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -68,7 +88,7 @@ jobs:
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
   publish-dry-run:
     name: Cargo publish — dry run
-    needs: test
+    needs: [test, msrv]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

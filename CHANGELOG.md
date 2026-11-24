@@ -7,6 +7,25 @@ Prior to 1.0.0, minor version bumps may include breaking changes.
 
 ---
 
+## [3.0.0]
+
+### Core
+
+- Internally scoped option and positional keys cannot collide, including when names contain dots.
+- Validate command declarations before parsing, including duplicate labels, reserved built-ins, groups and positional cardinalities.
+- Removed unused development dependencies and aligned the lockfile with the Rust 1.74 MSRV.
+
+### Derive
+
+- Argument callbacks and command handlers run directly on the parsed `Parser`, `Args`, or `Subcommand` value.
+- Added `#[arg(skip)]` and `#[arg(skip = expression)]` for fields that are not CLI arguments.
+- Typed decoding completes before callbacks; callback order and selected-leaf dispatch follow the core parser.
+- The derive entrypoints no longer accept a separate application context.
+- `rust-args-parser-derive` is version 0.2.0.
+- Package manifests declare Rust 1.74.
+
+---
+
 ## [2.1.0]
 
 ### Added
@@ -169,6 +188,6 @@ match ap::parse(&env, &root, &argv, &mut app) {
 
 ## Notes
 
-- **MSRV** remains **1.60**.
+- **MSRV:** Rust 1.74.
 - Feature flags can be disabled with `default-features = false`.
 - For deterministic help output in tests, set `Env.color = ColorMode::Never`.

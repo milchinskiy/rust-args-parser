@@ -91,7 +91,7 @@ fn handler(_m: &rapp::Matches, c: &mut Ctx) -> Result<(), AppErr> {
     let name = c.name.as_deref().unwrap_or("<none>");
     let port = c.port.unwrap_or(0);
     let path = c.path.as_deref().unwrap_or_else(|| Path::new("."));
-    eprintln!("name={name} port={port} path={path:?} verbose={}", c.verbose);
+    eprintln!("name={name} port={port} path={} verbose={}", path.display(), c.verbose);
     Ok(())
 }
 

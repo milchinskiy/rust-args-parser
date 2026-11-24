@@ -1,8 +1,10 @@
-#![cfg(feature = "suggest")]
 use rust_args_parser as ap;
+#[cfg(feature = "suggest")]
 mod common;
+#[cfg(feature = "suggest")]
 use common::*;
 
+#[cfg(feature = "suggest")]
 #[test]
 fn unknown_options_and_commands_suggest() {
     let mut env = env_basic();
@@ -37,14 +39,26 @@ fn unknown_options_and_commands_suggest() {
 #[cfg(not(feature = "suggest"))]
 #[test]
 fn unknown_has_no_suggestions_when_feature_off() {
-    let env = env_basic();
-    let root = ap::CmdSpec::new("t").opt(ap::OptSpec::flag("helpme", |_| {}).long("helpme"));
-    let err = ap::parse(&env, &root, &argv(&["--helme"]), &mut Ctx::default()).unwrap_err();
+    let env = ap::Env::default();
+    let root = ap::CmdSpec::new("t").opt(ap::OptSpec::flag("helpme", |_: &mut ()| {}).long("helpme"));
+    let err = ap::parse(&env, &root, &["--helme".into()], &mut ()).unwrap_err();
     match err {
         ap::Error::UnknownOption { token, suggestions } => {
             assert_eq!(token, "--helme");
-            assert!(suggestions.is_empty());
+            assert_eq!(suggestions, Vec::<String>::new());
         }
         _ => panic!("{err:?}"),
+    }
+}
+
+#[cfg(feature = "suggest")]
+#[test]
+fn unicode_suggestions_use_character_distance() {
+    let env = env_basic();
+    let root = ap::CmdSpec::new("tool").subcmd(ap::CmdSpec::new("café"));
+    let err = ap::parse(&env, &root, &argv(&["cafe"]), &mut Ctx::default()).unwrap_err();
+    match err {
+        ap::Error::UnknownCommand { suggestions, .. } => assert_eq!(suggestions, vec!["café"]),
+        other => panic!("unexpected: {other:?}"),
     }
 }

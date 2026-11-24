@@ -96,12 +96,14 @@ fn long_next_arg_negative_value() {
     assert_eq!(ctx.limit.as_deref(), Some("-3"));
 }
 
+#[cfg(unix)]
 #[test]
 fn non_utf8_after_double_dash_is_positional() {
+    use std::os::unix::ffi::OsStringExt;
     let env = env_basic();
     let root = ap::CmdSpec::new("t").pos(ap::PosSpec::new("FILE", push_file).many());
     let mut ctx = Ctx::default();
-    let bad = unsafe { std::ffi::OsString::from_encoded_bytes_unchecked(vec![0xff, b'a']) };
+    let bad = std::ffi::OsString::from_vec(vec![0xff, b'a']);
     let argv = vec!["--".into(), bad, "ok".into()];
     ap::parse(&env, &root, &argv, &mut ctx).unwrap();
     assert_eq!(ctx.files.len(), 2);
